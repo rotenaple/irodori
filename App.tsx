@@ -26,7 +26,7 @@ const App: React.FC = () => {
 
   const [smoothingLevels, setSmoothingLevels] = useState<number>(1);
   const [upscaleFactor, setUpscaleFactor] = useState<number | 'NS'>('NS');
-  const [denoiseRadius, setDenoiseRadius] = useState<number>(1);
+  const [denoiseRadius, setDenoiseRadius] = useState<number>(0);
   const [edgeProtection, setEdgeProtection] = useState<number>(50);
   const [skipColorCleanup, setSkipColorCleanup] = useState<boolean>(false);
 
