@@ -7,7 +7,7 @@ interface ImageWorkspaceProps {
   image: string | null;
   processedImage: string | null;
   activeTab: 'original' | 'processed';
-  setActiveTab: (t: 'original' | 'processed');
+  setActiveTab: (t: 'original' | 'processed') => void;
   originalSize: number;
   processedSize: number;
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -181,7 +181,6 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
             onMouseMove={handleMouseMove} 
             onMouseLeave={() => !magnifierPos?.locked && setMagnifierPos(null)}
           >
-            {/* Using w-full h-full object-contain ensures both images fill the container identically regardless of intrinsic size */}
             <div className="w-full h-full flex items-center justify-center p-4">
                 <canvas 
                   ref={canvasRef} 
@@ -231,7 +230,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                 {magnifierPos.locked && (
                   <>
                     <button 
-                      onClick={(e) => { e.stopPropagation(); setMagnifierPos(null); }}
+                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); setMagnifierPos(null); }}
                       className="absolute top-3 right-1/2 translate-x-1/2 w-8 h-8 bg-[#333] text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"
                     >
                       <i className="fa-solid fa-xmark text-sm"></i>
@@ -240,7 +239,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                       <div className="w-4 h-4 rounded-full border border-black/10 shadow-inner" style={{ backgroundColor: magnifierPos.hex }} />
                       <span className="text-sm font-bold font-mono text-[#333]">{magnifierPos.hex.toUpperCase()}</span>
                       <button 
-                        onClick={(e) => { e.stopPropagation(); handleAdd(); }}
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleAdd(); }}
                         className="ml-1 text-[#33569a] hover:opacity-70 transition-opacity"
                         title="Sample"
                       >
