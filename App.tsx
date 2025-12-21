@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { PaletteColor, ProcessingState, ColorGroup } from './types';
-import { 
-  rgbToHex, 
-  hexToRgb, 
-  findClosestColor, 
+import {
+  rgbToHex,
+  hexToRgb,
+  findClosestColor,
   extractColorGroups,
   blendColors,
   sigmoidSnap,
@@ -22,13 +22,13 @@ const App: React.FC = () => {
   const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [manualLayerIds, setManualLayerIds] = useState<string[]>([]);
   const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({});
-  
+
   const [smoothingLevels, setSmoothingLevels] = useState<number>(1);
   const [upscaleFactor, setUpscaleFactor] = useState<number | 'NS'>('NS');
   const [denoiseRadius, setDenoiseRadius] = useState<number>(1);
   const [edgeProtection, setEdgeProtection] = useState<number>(50);
   const [skipColorCleanup, setSkipColorCleanup] = useState<boolean>(false);
-  
+
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'original' | 'processed'>('original');
@@ -74,7 +74,7 @@ const App: React.FC = () => {
           const imageData = ctx.getImageData(0, 0, img.width, img.height);
           const result = extractColorGroups(imageData);
           setColorGroups(result.groups.slice(0, 10));
-          
+
           const initialSelections: Record<string, string> = {};
           const initialEnabled = new Set<string>();
           result.groups.slice(0, 6).forEach(g => {
@@ -132,7 +132,7 @@ const App: React.FC = () => {
     const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true });
     if (!nCtx) return;
     nCtx.drawImage(img, 0, 0);
-    
+
     let baseData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight);
     if (denoiseRadius > 0) baseData = applyMedianFilter(baseData, denoiseRadius);
     nCtx.putImageData(baseData, 0, 0);
@@ -141,24 +141,24 @@ const App: React.FC = () => {
     if (skipColorCleanup) {
       const finalW = Math.round(nativeWidth * targetUpscale);
       const finalH = Math.round(nativeHeight * targetUpscale);
-      
+
       const finalCanvas = document.createElement('canvas');
       finalCanvas.width = finalW;
       finalCanvas.height = finalH;
       const fCtx = finalCanvas.getContext('2d');
       if (fCtx) {
-          fCtx.imageSmoothingEnabled = true;
-          fCtx.imageSmoothingQuality = 'high';
-          fCtx.drawImage(nativeCanvas, 0, 0, finalW, finalH);
-          
-          finalCanvas.toBlob((blob) => {
-              if (blob) {
-                setProcessedSize(blob.size);
-                setProcessedImage(URL.createObjectURL(blob));
-                setProcessingState('completed');
-                setActiveTab('processed');
-              }
-          }, 'image/png');
+        fCtx.imageSmoothingEnabled = true;
+        fCtx.imageSmoothingQuality = 'high';
+        fCtx.drawImage(nativeCanvas, 0, 0, finalW, finalH);
+
+        finalCanvas.toBlob((blob) => {
+          if (blob) {
+            setProcessedSize(blob.size);
+            setProcessedImage(URL.createObjectURL(blob));
+            setProcessingState('completed');
+            setActiveTab('processed');
+          }
+        }, 'image/png');
       }
       return;
     }
@@ -170,7 +170,7 @@ const App: React.FC = () => {
     const MAX_PIXELS = 10000000;
     const currentPixels = workspaceWidth * workspaceHeight;
     const safeScale = currentPixels > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
-    
+
     const finalWorkspaceWidth = Math.round(nativeWidth * safeScale);
     const finalWorkspaceHeight = Math.round(nativeHeight * safeScale);
 
@@ -193,9 +193,9 @@ const App: React.FC = () => {
 
     const outputData = new Uint8ClampedArray(pixelData.length);
     let coreIdxMap = new Int16Array(finalWorkspaceWidth * finalWorkspaceHeight);
-    
+
     for (let i = 0; i < pixelData.length; i += 4) {
-      const pixel = { r: pixelData[i], g: pixelData[i+1], b: pixelData[i+2] };
+      const pixel = { r: pixelData[i], g: pixelData[i + 1], b: pixelData[i + 2] };
       const closest = findClosestColor(pixel, matchPalette);
       coreIdxMap[i / 4] = matchPalette.findIndex(p => p.id === closest.id);
     }
@@ -215,18 +215,18 @@ const App: React.FC = () => {
             const counts: Record<number, number> = {};
             let maxCount = 0;
             let dominantIdx = coreIdxMap[idx];
-            
+
             for (let dy = -radius; dy <= radius; dy++) {
               for (let dx = -radius; dx <= radius; dx++) {
                 const ny = y + dy;
                 const nx = x + dx;
                 if (ny >= 0 && ny < finalWorkspaceHeight && nx >= 0 && nx < finalWorkspaceWidth) {
-                   const nIdx = coreIdxMap[ny * finalWorkspaceWidth + nx];
-                   counts[nIdx] = (counts[nIdx] || 0) + 1;
-                   if (counts[nIdx] > maxCount) {
-                     maxCount = counts[nIdx];
-                     dominantIdx = nIdx;
-                   }
+                  const nIdx = coreIdxMap[ny * finalWorkspaceWidth + nx];
+                  counts[nIdx] = (counts[nIdx] || 0) + 1;
+                  if (counts[nIdx] > maxCount) {
+                    maxCount = counts[nIdx];
+                    dominantIdx = nIdx;
+                  }
                 }
               }
             }
@@ -242,10 +242,10 @@ const App: React.FC = () => {
         const idx = y * finalWorkspaceWidth + x;
         const coreIdx = coreIdxMap[idx];
         let neighborIndices = new Set<number>();
-        
+
         if (smoothingLevels > 0) {
-          for(let dy = -1; dy <= 1; dy++) {
-            for(let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
               if (dx === 0 && dy === 0) continue;
               const nx = x + dx, ny = y + dy;
               if (nx >= 0 && nx < finalWorkspaceWidth && ny >= 0 && ny < finalWorkspaceHeight) {
@@ -263,15 +263,15 @@ const App: React.FC = () => {
           const currentPixel = { r: pixelData[idx * 4], g: pixelData[idx * 4 + 1], b: pixelData[idx * 4 + 2] };
           const candidates: PaletteColor[] = [matchPalette[coreIdx]];
           const steps = Math.pow(2, smoothingLevels) - 1;
-          
+
           neighborIndices.forEach(ni => {
             candidates.push(matchPalette[ni]);
             const contrast = getColorDistance(matchPalette[coreIdx], matchPalette[ni]);
             const sharpFactor = contrast > 120 ? 18 : 10;
             for (let s = 1; s <= steps; s++) {
-               const sr = sigmoidSnap(s / (steps + 1), sharpFactor);
-               const b = blendColors(matchPalette[coreIdx], matchPalette[ni], sr);
-               candidates.push({ ...b, hex: rgbToHex(b.r, b.g, b.b), id: `blend-${coreIdx}-${ni}-${s}` });
+              const sr = sigmoidSnap(s / (steps + 1), sharpFactor);
+              const b = blendColors(matchPalette[coreIdx], matchPalette[ni], sr);
+              candidates.push({ ...b, hex: rgbToHex(b.r, b.g, b.b), id: `blend-${coreIdx}-${ni}-${s}` });
             }
           });
 
@@ -286,16 +286,16 @@ const App: React.FC = () => {
           }
         }
         const outIdx = idx * 4;
-        outputData[outIdx] = finalColor.r; outputData[outIdx+1] = finalColor.g; outputData[outIdx+2] = finalColor.b; outputData[outIdx+3] = 255;
+        outputData[outIdx] = finalColor.r; outputData[outIdx + 1] = finalColor.g; outputData[outIdx + 2] = finalColor.b; outputData[outIdx + 3] = 255;
       }
     }
 
     wCtx.putImageData(new ImageData(outputData, finalWorkspaceWidth, finalWorkspaceHeight), 0, 0);
-    
+
     const finalCanvas = document.createElement('canvas');
     finalCanvas.width = Math.round(nativeWidth * targetUpscale);
     finalCanvas.height = Math.round(nativeHeight * targetUpscale);
-    
+
     const fCtx = finalCanvas.getContext('2d');
     if (fCtx) {
       fCtx.fillStyle = '#000000';
@@ -303,7 +303,7 @@ const App: React.FC = () => {
       fCtx.imageSmoothingEnabled = true;
       fCtx.imageSmoothingQuality = 'high';
       fCtx.drawImage(workspaceCanvas, 0, 0, finalCanvas.width, finalCanvas.height);
-      
+
       finalCanvas.toBlob((blob) => {
         if (blob) {
           setProcessedSize(blob.size);
@@ -341,17 +341,17 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="h-full flex flex-col bg-white overflow-hidden">
       <Header />
 
       {/* Main Container - Constrained Width but Full Height available */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 md:px-6 flex flex-col md:flex-row min-h-0 h-[calc(100vh-64px)]">
-        
+      <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0">
+
         {/* Left Column: Control Panel */}
-        <aside className="w-full md:w-96 lg:w-[420px] flex-none h-full border-r border-[#333]/5 bg-white overflow-hidden flex flex-col relative z-10">
-          <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
-            <h2 className="text-sm font-bold uppercase tracking-widest mb-6 text-[#333]/40 border-b border-[#333]/5 pb-2">Configurations</h2>
-            <ControlPanel 
+        <aside className="w-full md:w-96 lg:w-[420px] pl-4 md:pl-10 flex-none h-full border-r border-[#333]/5 bg-white overflow-hidden flex flex-col relative z-10">
+          <div className="px-6 py-4 overflow-y-auto custom-scrollbar flex-1">
+            <h2 className="text-[11px] font-bold uppercase tracking-widest mb-2 text-[#333]/40 border-b border-[#333]/5 pb-1">Configurations</h2>
+            <ControlPanel
               upscaleFactor={upscaleFactor} setUpscaleFactor={setUpscaleFactor}
               denoiseRadius={denoiseRadius} setDenoiseRadius={setDenoiseRadius}
               smoothingLevels={smoothingLevels} setSmoothingLevels={setSmoothingLevels}
@@ -368,37 +368,38 @@ const App: React.FC = () => {
               setSkipColorCleanup={setSkipColorCleanup}
             />
           </div>
-          
+
           {/* Action Footer */}
-          <div className="p-6 border-t border-[#333]/5 bg-white space-y-3 shadow-[0_-5px_20px_rgba(0,0,0,0.03)] z-20">
-             <button 
-                onClick={processImage} 
+          <div className="px-6 py-4 z-20">
+            <div className="flex flex-row gap-2">
+              <button
+                onClick={processImage}
                 disabled={!image || (!skipColorCleanup && palette.length === 0) || processingState === 'processing'}
-                className="w-full bg-[#333] text-white rounded-xl py-3.5 font-bold uppercase tracking-widest text-sm shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none hover:bg-black flex items-center justify-center gap-2"
+                className="flex-1 bg-[#333] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[12px] shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none hover:bg-black flex items-center justify-center gap-2"
               >
                 {processingState === 'processing' ? (
-                  <><i className="fa-solid fa-circle-notch fa-spin"></i> Processing</>
+                  <><i className="fa-solid fa-circle-notch fa-spin"></i></>
                 ) : (
-                  <><i className="fa-solid fa-wand-magic-sparkles"></i> Apply Cleanup</>
+                  <><i className="fa-solid fa-wand-magic-sparkles"></i> Apply</>
                 )}
               </button>
 
               {processedImage && (
-                <button 
+                <button
                   onClick={downloadImage}
-                  className="w-full bg-[#33569a] text-white rounded-xl py-3.5 font-bold uppercase tracking-widest text-sm shadow-lg active:scale-[0.98] transition-all hover:bg-[#25427a] flex items-center justify-center gap-2"
+                  className="flex-1 bg-[#33569a] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[12px] shadow-lg active:scale-[0.98] transition-all hover:bg-[#25427a] flex items-center justify-center gap-2"
                 >
-                  <i className="fa-solid fa-download"></i> Download Result
+                  <i className="fa-solid fa-download"></i> Download
                 </button>
               )}
+            </div>
           </div>
         </aside>
 
         {/* Right Column: Workspace */}
-        <section className="flex-1 h-full p-6 flex flex-col bg-[#FAFAFA] min-w-0 border-l border-[#333]/5">
-          <h2 className="text-sm font-bold uppercase tracking-widest mb-6 text-[#333]/40 border-b border-[#333]/5 pb-2">Preview Workspace</h2>
+        <section className="flex-1 h-full pt-2 pb-2 pr-6 md:pr-16 pl-6 flex flex-col bg-[#FAFAFA] min-w-0 border-l border-[#333]/5">
           <div className="flex-1 min-h-0">
-            <ImageWorkspace 
+            <ImageWorkspace
               image={image} processedImage={processedImage}
               activeTab={activeTab} setActiveTab={setActiveTab}
               originalSize={originalSize} processedSize={processedSize}
@@ -411,11 +412,11 @@ const App: React.FC = () => {
 
       {editTarget && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm" onClick={() => setEditTarget(null)}>
-          <ColorPickerModal 
+          <ColorPickerModal
             title={editTarget.type === 'original' ? 'Source' : 'Target'}
             mode={editTarget.type === 'original' && !manualLayerIds.includes(editTarget.id) ? 'sampled' : 'spectrum'}
             currentHex={
-              editTarget.type === 'original' 
+              editTarget.type === 'original'
                 ? (selectedInGroup[editTarget.id] || '#ffffff')
                 : (colorOverrides[editTarget.id] || selectedInGroup[editTarget.id] || '#ffffff')
             }
