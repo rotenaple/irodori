@@ -134,19 +134,19 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   })();
 
   return (
-    <div className="flex flex-col gap-1.5 w-full h-full min-h-0">
-      <div className="flex items-center justify-between pb-1.5 border-b border-[#333]/5">
+    <div className="flex flex-col gap-2 md:gap-1.5 w-full h-auto md:h-full min-h-0">
+      <div className="flex items-center justify-between px-1 pt-1 pb-2 md:pb-1.5 border-b border-[#333]/5">
         <div className="flex bg-[#EBEBEB] p-1 rounded-xl gap-1">
           <button
             onClick={() => setActiveTab('original')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition-all ${activeTab === 'original' ? 'bg-white text-[#333] shadow-sm' : 'text-[#333] hover:bg-black/5'}`}
+            className={`px-3 md:px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition-all ${activeTab === 'original' ? 'bg-white text-[#333] shadow-sm' : 'text-[#333] hover:bg-black/5'}`}
           >
             Original
           </button>
           <button
             onClick={() => setActiveTab('processed')}
             disabled={!processedImage}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition-all ${activeTab === 'processed' ? 'bg-white text-[#333] shadow-sm' : 'text-[#333] hover:bg-black/5 disabled:opacity-30'}`}
+            className={`px-3 md:px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition-all ${activeTab === 'processed' ? 'bg-white text-[#333] shadow-sm' : 'text-[#333] hover:bg-black/5 disabled:opacity-30'}`}
           >
             Processed
           </button>
@@ -168,7 +168,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-[400px] overflow-hidden group">
+      <div className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-hidden group flex items-center justify-center p-0 md:p-4">
         {!image ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center opacity-10">
             <i className="fa-solid fa-flag text-6xl mb-6"></i>
@@ -177,22 +177,22 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
         ) : (
           <div
             ref={containerRef}
-            className="w-full h-full relative"
+            className="w-full h-auto md:h-full relative mb-8 md:mb-0"
             onMouseMove={handleMouseMove}
             onMouseLeave={() => !magnifierPos?.locked && setMagnifierPos(null)}
           >
-            <div className="w-full h-full flex items-center justify-center px-16 py-4">
+            <div className="w-full h-auto md:h-full flex items-center justify-center">
               <canvas
                 ref={canvasRef}
                 onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
-                className={`w-full h-full object-contain ${activeTab === 'original' ? 'block' : 'hidden'} cursor-crosshair drop-shadow-xl`}
+                className={`w-full h-auto md:h-full object-contain ${activeTab === 'original' ? 'block' : 'hidden'} cursor-crosshair drop-shadow-xl`}
               />
               {processedImage && activeTab === 'processed' && (
                 <img
                   src={processedImage}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Cleaned"
-                  className="w-full h-full object-contain drop-shadow-xl block cursor-crosshair"
+                  className="w-full h-auto md:h-full object-contain drop-shadow-xl block cursor-crosshair"
                 />
               )}
             </div>

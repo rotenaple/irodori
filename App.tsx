@@ -345,11 +345,11 @@ const App: React.FC = () => {
       <Header />
 
       {/* Main Container - Constrained Width but Full Height available */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0">
+      <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
 
         {/* Left Column: Control Panel */}
-        <aside className="w-full md:w-96 lg:w-[420px] pl-4 md:pl-10 flex-none h-full border-r border-[#333]/5 bg-white overflow-hidden flex flex-col relative z-10">
-          <div className="px-6 py-4 overflow-y-auto custom-scrollbar flex-1">
+        <aside className="w-full md:w-96 lg:w-[420px] px-0 md:pl-10 flex-none md:h-full border-r border-[#333]/5 bg-white flex flex-col relative z-10">
+          <div className="px-4 md:px-6 py-4 overflow-y-auto md:overflow-y-auto custom-scrollbar flex-1 min-h-[400px] md:min-h-0">
             <h2 className="text-[11px] font-bold uppercase tracking-widest mb-2 text-[#333]/40 border-b border-[#333]/5 pb-1">Configurations</h2>
             <ControlPanel
               upscaleFactor={upscaleFactor} setUpscaleFactor={setUpscaleFactor}
@@ -370,7 +370,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Action Footer */}
-          <div className="px-6 py-4 z-20">
+          <div className="px-4 md:px-6 py-4 z-20">
             <div className="flex flex-row gap-2">
               <button
                 onClick={processImage}
@@ -397,7 +397,7 @@ const App: React.FC = () => {
         </aside>
 
         {/* Right Column: Workspace */}
-        <section className="flex-1 h-full pt-2 pb-2 pr-6 md:pr-16 pl-6 flex flex-col bg-[#FAFAFA] min-w-0 border-l border-[#333]/5">
+        <section className="flex-1 md:h-full pt-1 pb-10 px-4 md:pt-2 md:pb-2 md:pr-16 md:pl-6 flex flex-col bg-[#FAFAFA] min-w-0 border-l border-[#333]/5 min-h-[200px] md:min-h-0">
           <div className="flex-1 min-h-0">
             <ImageWorkspace
               image={image} processedImage={processedImage}
