@@ -191,7 +191,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                 let finalColor: PaletteColor;
                 if (neighborIndices.size === 0 || smoothingLevels === 0) {
-                    finalColor = matchPalette[coreIdx];
+                    const p = matchPalette[coreIdx];
+                    if (p.targetHex) {
+                        const tRgb = hexToRgb(p.targetHex);
+                        finalColor = tRgb ? { ...tRgb, hex: p.targetHex, id: p.id } : p;
+                    } else {
+                        finalColor = p;
+                    }
                 } else {
                     const outIdx = idx * 4;
                     const currentPixel = { r: pixelData[outIdx], g: pixelData[outIdx + 1], b: pixelData[outIdx + 2] };
@@ -199,13 +205,27 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const steps = Math.pow(2, smoothingLevels) - 1;
 
                     neighborIndices.forEach(ni => {
+                        // Matching is done against SOURCE colors (matchPalette has source RGBs)
                         candidates.push(matchPalette[ni]);
                         const contrast = getColorDistance(matchPalette[coreIdx], matchPalette[ni]);
                         const sharpFactor = contrast > 120 ? 18 : 10;
+
+                        // Pre-calculate target colors for blending if needed? No, we need source blends for matching.
+                        // We only need target colors for the final output.
+                        const targetC1 = matchPalette[coreIdx].targetHex ? hexToRgb(matchPalette[coreIdx].targetHex!)! : matchPalette[coreIdx];
+                        const targetC2 = matchPalette[ni].targetHex ? hexToRgb(matchPalette[ni].targetHex!)! : matchPalette[ni];
+
                         for (let s = 1; s <= steps; s++) {
                             const sr = sigmoidSnap(s / (steps + 1), sharpFactor);
-                            const b = blendColors(matchPalette[coreIdx], matchPalette[ni], sr);
-                            candidates.push({ ...b, hex: rgbToHex(b.r, b.g, b.b), id: `blend-${coreIdx}-${ni}-${s}` });
+                            // Blend between the TARGET colors for the candidates list (what we want to see)
+                            // BUT wait, findClosestColor compares against the PIXEL (source). 
+                            // The pixel matches matchPalette[coreIdx] (source).
+                            // So the candidate color for matching should be a blend of the SOURCE colors.
+                            // However, we want the ID to carry the blend info, and we'll resolve the final color later.
+
+                            const bSource = blendColors(matchPalette[coreIdx], matchPalette[ni], sr);
+                            // We construct a candidate that LOOKS like the source blend for matching purposes
+                            candidates.push({ ...bSource, hex: rgbToHex(bSource.r, bSource.g, bSource.b), id: `blend-${coreIdx}-${ni}-${s}` });
                         }
                     });
 
@@ -215,13 +235,37 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     if (winner.id.startsWith('blend-')) {
                         const parts = winner.id.split('-');
                         const i1 = parseInt(parts[1]), i2 = parseInt(parts[2]), s = parseInt(parts[3]);
-                        const b = blendColors(matchPalette[i1], matchPalette[i2], sigmoidSnap(s / (steps + 1), 12));
+
+                        // Resolve the TARGET colors for the final output
+                        const p1 = matchPalette[i1];
+                        const p2 = matchPalette[i2];
+                        const c1 = p1.targetHex ? hexToRgb(p1.targetHex)! : p1;
+                        const c2 = p2.targetHex ? hexToRgb(p2.targetHex)! : p2;
+
+                        const b = blendColors(c1, c2, sigmoidSnap(s / (steps + 1), 12));
                         finalColor = { ...b, hex: rgbToHex(b.r, b.g, b.b), id: winner.id };
                     } else {
                         // It's a palette color
                         // winner matches a candidate, which comes from matchPalette
                         const found = matchPalette.find(p => p.id === winner.id);
-                        finalColor = found || matchPalette[coreIdx];
+                        // If found, use its target color if available
+                        if (found) {
+                            if (found.targetHex) {
+                                const tRgb = hexToRgb(found.targetHex);
+                                finalColor = tRgb ? { ...tRgb, hex: found.targetHex, id: found.id } : found;
+                            } else {
+                                finalColor = found;
+                            }
+                        } else {
+                            // Fallback to coreIdx if something weird happens, ensuring targetHex usage
+                            const core = matchPalette[coreIdx];
+                            if (core.targetHex) {
+                                const tRgb = hexToRgb(core.targetHex);
+                                finalColor = tRgb ? { ...tRgb, hex: core.targetHex, id: core.id } : core;
+                            } else {
+                                finalColor = core;
+                            }
+                        }
                     }
                 }
 

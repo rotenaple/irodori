@@ -101,9 +101,14 @@ const App: React.FC = () => {
     const p: PaletteColor[] = [];
     enabledGroups.forEach(id => {
       const baseHex = selectedInGroup[id];
-      const targetHex = colorOverrides[id] || baseHex;
-      const rgb = hexToRgb(targetHex);
-      if (rgb) p.push({ ...rgb, hex: targetHex, id });
+      const targetHex = colorOverrides[id];
+      const rgb = hexToRgb(baseHex);
+      if (rgb) p.push({
+        ...rgb,
+        hex: baseHex,
+        id,
+        targetHex: targetHex
+      });
     });
     return p;
   }, [selectedInGroup, enabledGroups, colorOverrides]);

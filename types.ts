@@ -8,6 +8,7 @@ export interface ColorRGB {
 export interface PaletteColor extends ColorRGB {
   hex: string;
   id: string;
+  targetHex?: string;
 }
 
 export interface ColorInstance {
