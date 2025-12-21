@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Irodori - Flag Artifact Remover</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #333;
+            --bg-light: #EBEBEB;
+            --bg-white: #ffffff;
+            --text-main: #333;
+            --text-alt: #EBEBEB;
+            --accent: #33569a;
+            --accent-hover: #183650;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-white);
+            color: var(--text-main);
+            margin: 0;
+            padding-top: 64px; /* Space for fixed header */
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Inter', sans-serif;
+            font-weight: 700;
+        }
+
+        /* Custom scrollbar to match theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-light);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-dark);
+            border-radius: 4px;
+        }
+
+        .custom-slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            background: var(--bg-light);
+            border-radius: 3px;
+            outline: none;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+
+        .custom-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--bg-dark);
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .rotenaple-style-logo {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 8px;
+            background-color: var(--bg-dark);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--bg-light);
+            transition: all 0.2s;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>
