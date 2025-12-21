@@ -1,5 +1,5 @@
 {
-  "name": "Irodori - Flag Artifact Remover",
-  "description": "A high-precision tool for cleaning up flag designs by quantizing colors and removing JPEG compression artifacts and noise.",
+  "name": "Irodori",
+  "description": "",
   "requestFramePermissions": []
 }
