@@ -9,7 +9,7 @@ export const Header: React.FC = () => {
           <h1 className="text-[#333] text-xl font-black tracking-tighter leading-none uppercase">
             Irodori
           </h1>
-          <h2 className="text-[#666] text-[12px] font-bold tracking-widest leading-none uppercase">
+          <h2 className="text-[#666] text-[16px] font-medium tracking-widest leading-none uppercase" style={{ fontFamily: "'Kiwi Maru', serif" }}>
             いろどり
           </h2>
         </div>
