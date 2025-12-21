@@ -78,49 +78,61 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, 
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
+      <div className="flex-1 min-h-0 flex flex-col relative bg-white">
         {mode === 'spectrum' ? (
-          <div className="space-y-6">
-            <canvas
-              ref={canvasRef} width={400} height={60}
-              className="w-full h-20 rounded-xl border border-slate-200 cursor-crosshair shadow-sm"
-              onMouseDown={handleInteract}
-              onMouseMove={(e) => e.buttons === 1 && handleInteract(e)}
-              onTouchMove={handleInteract}
-            />
-
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-lg border border-slate-200 shadow-sm shrink-0" style={{ backgroundColor: currentHex }} />
-                <div className="flex-1">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Hex Color</span>
-                  <input
-                    type="text" value={currentHex.toUpperCase()}
-                    onChange={(e) => onChange(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 font-mono text-sm text-slate-700 outline-none focus:border-[#33569a] transition-colors"
+          <>
+            <div className="px-5 pt-5 pb-3 shrink-0 relative z-10 shadow-[0_4px_20px_-12px_rgba(0,0,0,0.05)]">
+              <div className="flex flex-col lg:flex-row gap-4 mb-4">
+                <div className="lg:w-1/2">
+                  <canvas
+                    ref={canvasRef} width={400} height={60}
+                    className="w-full h-20 lg:h-full rounded-xl border border-slate-200 cursor-crosshair shadow-sm block"
+                    onMouseDown={handleInteract}
+                    onMouseMove={(e) => e.buttons === 1 && handleInteract(e)}
+                    onTouchMove={handleInteract}
                   />
+                </div>
+
+                <div className="lg:w-1/2 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg border border-slate-200 shadow-sm shrink-0" style={{ backgroundColor: currentHex }} />
+                    <div className="flex-1 flex items-center gap-3">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 shrink-0">Hex</span>
+                      <input
+                        type="text" value={currentHex.toUpperCase()}
+                        onChange={(e) => onChange(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-mono text-sm text-slate-700 outline-none focus:border-[#33569a] transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    {(['r', 'g', 'b'] as const).map(c => (
+                      <div key={c} className="flex items-center gap-2">
+                        <span className="w-3 text-[10px] font-bold uppercase text-slate-400">{c}</span>
+                        <div className="flex-1 h-5 flex items-center">
+                          <input type="range" min="0" max="255" value={rgb[c]} onChange={(e) => updateRGB(c, e.target.value)} className="custom-slider" />
+                        </div>
+                        <input
+                          type="number"
+                          value={rgb[c]}
+                          onChange={(e) => updateRGB(c, e.target.value)}
+                          className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-3 pt-1">
-                {(['r', 'g', 'b'] as const).map(c => (
-                  <div key={c} className="flex items-center gap-3">
-                    <span className="w-3 text-[10px] font-bold uppercase text-slate-400">{c}</span>
-                    <div className="flex-1 h-6 flex items-center">
-                      <input type="range" min="0" max="255" value={rgb[c]} onChange={(e) => updateRGB(c, e.target.value)} className="custom-slider" />
-                    </div>
-                    <input type="number" value={rgb[c]} onChange={(e) => updateRGB(c, e.target.value)} className="w-12 bg-white border border-slate-200 rounded-md py-0.5 text-center font-mono text-xs text-slate-600" />
-                  </div>
-                ))}
+              <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+                <button onClick={() => setPaletteTab('classic')} className={`px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all flex-1 text-center ${paletteTab === 'classic' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Classic</button>
+                <button onClick={() => setPaletteTab('bright')} className={`px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all flex-1 text-center ${paletteTab === 'bright' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Bright</button>
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="flex gap-1 bg-slate-100 p-1 rounded-lg inline-flex">
-                <button onClick={() => setPaletteTab('classic')} className={`px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all ${paletteTab === 'classic' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Classic</button>
-                <button onClick={() => setPaletteTab('bright')} className={`px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all ${paletteTab === 'bright' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Bright</button>
-              </div>
-              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 items-start">
+            <div className="flex-1 overflow-y-auto px-5 pb-5 scrollbar-thin">
+              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 items-start mt-1">
                 {PALETTES[paletteTab].map(p => (
                   <button key={p.hex} onClick={() => onChange(p.hex)} className={`group p-1.5 rounded-lg border transition-all h-full flex flex-col ${currentHex.toLowerCase() === p.hex.toLowerCase() ? 'border-slate-400 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={p.name}>
                     <div className="w-full aspect-square rounded-md shadow-sm border border-black/5 mb-1.5 shrink-0" style={{ backgroundColor: p.hex }} />
@@ -129,23 +141,25 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, 
                 ))}
               </div>
             </div>
-          </div>
+          </>
         ) : (
-          <div className="space-y-4">
-            <p className="text-xs text-slate-500 italic">Select a color from the image palette.</p>
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-8 gap-3">
-              {processedSuggestions.map((s, idx) => (
-                <button key={idx} onClick={() => onChange(s.hex)} className={`group p-1.5 rounded-xl border transition-all ${currentHex.toLowerCase() === s.hex.toLowerCase() ? 'border-[#333]/20 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={s.name || s.hex}>
-                  <div className="w-full aspect-square rounded-lg mb-1 shadow-sm border border-black/5" style={{ backgroundColor: s.hex }} />
-                  <div className="text-[9px] font-mono text-center text-slate-500 group-hover:text-slate-700 truncate">{s.name || s.hex.toUpperCase()}</div>
-                </button>
-              ))}
-            </div>
-            {processedSuggestions.length === 0 && (
-              <div className="text-center py-8 text-slate-400 text-xs border-2 border-dashed border-slate-100 rounded-xl">
-                No matching colors found in source
+          <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
+            <div className="space-y-4">
+              <p className="text-xs text-slate-500 italic">Select a color from the image palette.</p>
+              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-8 gap-3">
+                {processedSuggestions.map((s, idx) => (
+                  <button key={idx} onClick={() => onChange(s.hex)} className={`group p-1.5 rounded-xl border transition-all ${currentHex.toLowerCase() === s.hex.toLowerCase() ? 'border-[#333]/20 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={s.name || s.hex}>
+                    <div className="w-full aspect-square rounded-lg mb-1 shadow-sm border border-black/5" style={{ backgroundColor: s.hex }} />
+                    <div className="text-[9px] font-mono text-center text-slate-500 group-hover:text-slate-700 truncate">{s.name || s.hex.toUpperCase()}</div>
+                  </button>
+                ))}
               </div>
-            )}
+              {processedSuggestions.length === 0 && (
+                <div className="text-center py-8 text-slate-400 text-xs border-2 border-dashed border-slate-100 rounded-xl">
+                  No matching colors found in source
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
