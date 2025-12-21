@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [manualLayerIds, setManualLayerIds] = useState<string[]>([]);
   const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({});
+  const [originalFileName, setOriginalFileName] = useState<string>('image');
 
   const [smoothingLevels, setSmoothingLevels] = useState<number>(1);
   const [upscaleFactor, setUpscaleFactor] = useState<number | 'NS'>('NS');
@@ -43,6 +44,7 @@ const App: React.FC = () => {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setOriginalFileName(file.name);
       setOriginalSize(file.size);
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -335,7 +337,12 @@ const App: React.FC = () => {
     if (processedImage) {
       const link = document.createElement('a');
       link.href = processedImage;
-      link.download = 'irodori-result.png';
+
+      // Extract basename and append suffix
+      const dotIndex = originalFileName.lastIndexOf('.');
+      const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
+      link.download = `${baseName}-irodori.png`;
+
       link.click();
     }
   };
