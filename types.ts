@@ -32,8 +32,9 @@ export type WorkerMessage = {
     upscaleFactor: number | 'NS';
     denoiseRadius: number;
     edgeProtection: number;
-    skipColorCleanup: boolean;
-    scaling: number;
+    disablePostProcessing: boolean;
+    disableRecoloring: boolean;
+    disableScaling: boolean;
     palette: PaletteColor[];
     enabledGroups: string[];
     selectedInGroup: Record<string, string>;

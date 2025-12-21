@@ -17,7 +17,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         upscaleFactor,
         denoiseRadius,
         edgeProtection,
-        skipColorCleanup,
+        disablePostProcessing,
+        disableRecoloring,
+        disableScaling,
         palette,
         smoothingLevels
     } = parameters;
@@ -28,14 +30,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         // determine target scale
         let targetUpscale = 1;
-        if (upscaleFactor === 'NS') {
-            const longNative = Math.max(nativeWidth, nativeHeight);
-            const shortNative = Math.min(nativeWidth, nativeHeight);
-            const scaleA = Math.min(535 / longNative, 355 / shortNative);
-            const scaleB = Math.min(568 / longNative, 321 / shortNative);
-            targetUpscale = Math.max(scaleA, scaleB);
-        } else {
-            targetUpscale = upscaleFactor as number;
+        if (!disableScaling) {
+            if (upscaleFactor === 'NS') {
+                const longNative = Math.max(nativeWidth, nativeHeight);
+                const shortNative = Math.min(nativeWidth, nativeHeight);
+                const scaleA = Math.min(535 / longNative, 355 / shortNative);
+                const scaleB = Math.min(568 / longNative, 321 / shortNative);
+                targetUpscale = Math.max(scaleA, scaleB);
+            } else {
+                targetUpscale = upscaleFactor as number;
+            }
         }
 
         const nativeCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
@@ -44,15 +48,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         nCtx.drawImage(imageBitmap, 0, 0);
 
-        // Denoise
-        let baseData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight);
-        if (denoiseRadius > 0) {
-            baseData = applyMedianFilter(baseData, denoiseRadius);
+        // Denoise (Part of Post-Processing)
+        if (!disablePostProcessing && denoiseRadius > 0) {
+            const baseData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight);
+            const denoisedData = applyMedianFilter(baseData, denoiseRadius);
+            nCtx.putImageData(denoisedData, 0, 0);
         }
-        nCtx.putImageData(baseData, 0, 0);
 
-        // Skip color cleanup path
-        if (skipColorCleanup) {
+        // If Recoloring is disabled, we skip the palette matching / cleanup entirely
+        // and just upscale the (possibly denoised) native image.
+        if (disableRecoloring) {
             const finalW = Math.round(nativeWidth * targetUpscale);
             const finalH = Math.round(nativeHeight * targetUpscale);
 
@@ -111,13 +116,17 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             coreIdxMap[i / 4] = pIdx !== -1 ? pIdx : 0;
         }
 
+        // Determine effective parameters based on flags
+        const effectiveEdgeProtection = disablePostProcessing ? 0 : edgeProtection;
+        const effectiveSmoothingLevels = disablePostProcessing ? 0 : smoothingLevels;
+
         // Edge Protection (Refinement)
-        if (edgeProtection > 0) {
+        if (effectiveEdgeProtection > 0) {
             let radius = 1;
             let iterations = 1;
-            if (edgeProtection > 33) { radius = 2; iterations = 2; }
-            if (edgeProtection > 66) { radius = 3; iterations = 3; }
-            if (edgeProtection > 85) { radius = 4; iterations = 5; }
+            if (effectiveEdgeProtection > 33) { radius = 2; iterations = 2; }
+            if (effectiveEdgeProtection > 66) { radius = 3; iterations = 3; }
+            if (effectiveEdgeProtection > 85) { radius = 4; iterations = 5; }
 
             let tempIdxMap = new Int16Array(coreIdxMap.length);
 
@@ -176,7 +185,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const coreIdx = coreIdxMap[idx];
                 let neighborIndices = new Set<number>();
 
-                if (smoothingLevels > 0) {
+                if (effectiveSmoothingLevels > 0) {
                     for (let dy = -1; dy <= 1; dy++) {
                         for (let dx = -1; dx <= 1; dx++) {
                             if (dx === 0 && dy === 0) continue;
@@ -190,7 +199,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
                 let finalColor: PaletteColor;
-                if (neighborIndices.size === 0 || smoothingLevels === 0) {
+                if (neighborIndices.size === 0 || effectiveSmoothingLevels === 0) {
                     const p = matchPalette[coreIdx];
                     if (p.targetHex) {
                         const tRgb = hexToRgb(p.targetHex);
@@ -202,7 +211,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const outIdx = idx * 4;
                     const currentPixel = { r: pixelData[outIdx], g: pixelData[outIdx + 1], b: pixelData[outIdx + 2] };
                     const candidates: PaletteColor[] = [matchPalette[coreIdx]];
-                    const steps = Math.pow(2, smoothingLevels) - 1;
+                    const steps = Math.pow(2, effectiveSmoothingLevels) - 1;
 
                     neighborIndices.forEach(ni => {
                         // Matching is done against SOURCE colors (matchPalette has source RGBs)

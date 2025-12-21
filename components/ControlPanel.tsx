@@ -39,8 +39,12 @@ interface ControlPanelProps {
 
   paletteLength: number;
 
-  skipColorCleanup: boolean;
-  setSkipColorCleanup: (v: boolean) => void;
+  disableScaling: boolean;
+  setDisableScaling: (v: boolean) => void;
+  disablePostProcessing: boolean;
+  setDisablePostProcessing: (v: boolean) => void;
+  disableRecoloring: boolean;
+  setDisableRecoloring: (v: boolean) => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -51,8 +55,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   image, onImageUpload, colorGroups, manualLayerIds,
   selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget,
-  paletteLength,
-  skipColorCleanup, setSkipColorCleanup
+  disableScaling, setDisableScaling,
+  disablePostProcessing, setDisablePostProcessing,
+  disableRecoloring, setDisableRecoloring
 }) => {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
 
@@ -78,35 +83,17 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* Parameters Group */}
       <div className="space-y-2">
 
-        {/* Cleanup Toggle */}
-        <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200 flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="text-[11px] font-bold text-[#333] uppercase tracking-wide">Bypass Color Cleanup</span>
-            <span className="text-[10px] text-slate-500">Resize & Re-encode only</span>
-          </div>
-          <div className="relative inline-block w-10 mr-1 align-middle select-none transition duration-200 ease-in">
-            <input
-              type="checkbox"
-              name="toggle"
-              id="toggle"
-              checked={skipColorCleanup}
-              onChange={(e) => setSkipColorCleanup(e.target.checked)}
-              className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-[#333]/20 checked:border-[#333] checked:right-0 right-5 transition-all"
-            />
-            <label htmlFor="toggle" className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer transition-colors ${skipColorCleanup ? 'bg-[#333]' : 'bg-slate-300'}`}></label>
-          </div>
-        </div>
-
         {/* Target Scale */}
         <div className="space-y-0.5">
-          <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+          <div className="flex justify-between items-center bg-slate-50 p-1 rounded-lg border border-slate-200 mb-1">
             <div className="flex items-center gap-2">
-              <span>Target Scale</span>
-              <button onClick={() => toggleInfo('scale')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+              <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 ${disableScaling ? 'text-slate-400' : 'text-[#333]'}`}>Target Scale</span>
+              <button onClick={() => toggleInfo('scale')} className="text-[#33569a] hover:opacity-70"><i className="fa-solid fa-circle-info"></i></button>
             </div>
-            <span className="font-mono text-[#33569a] bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}</span>
+            <span className={`font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px] ${disableScaling ? 'text-slate-400' : 'text-[#33569a]'}`}>{upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}</span>
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
+
+          <div className={`grid grid-cols-4 gap-1.5 transition-opacity ${disableScaling ? 'opacity-40 pointer-events-none' : ''}`}>
             {[1, 2, 4].map(f => (
               <button key={f} onClick={() => setUpscaleFactor(f as number)} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === f ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>{f}X</button>
             ))}
@@ -121,65 +108,89 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           )}
         </div>
 
-        {/* Denoise */}
-        <div className="space-y-0.5">
-          <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-            <div className="flex items-center gap-2">
-              <span>Denoise</span>
-              <button onClick={() => toggleInfo('denoise')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
-            </div>
-            <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{denoiseRadius === 0 ? "OFF" : denoiseRadius + "px"}</span>
+        {/* Post-Processing Group */}
+        <div className="space-y-2 pt-2 border-t border-[#333]/10">
+          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+            <button
+              onClick={() => setDisablePostProcessing(!disablePostProcessing)}
+              className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disablePostProcessing ? 'bg-[#333]' : 'bg-slate-300'}`}
+            >
+              <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disablePostProcessing ? 'translate-x-4' : 'translate-x-0'}`} />
+            </button>
+            <span className={`text-[10px] font-bold uppercase tracking-wide ${disablePostProcessing ? 'text-slate-400' : 'text-[#333]'}`}>Post-Processing</span>
           </div>
-          <input type="range" min="0" max="3" step="1" value={denoiseRadius} onChange={(e) => setDenoiseRadius(parseInt(e.target.value))} className="custom-slider" />
-          {activeInfo === 'denoise' && (
-            <InfoBox>
-              Applies a median filter to remove JPEG artifacts and noise speckles before processing colors.
-            </InfoBox>
-          )}
-        </div>
 
-        {/* Bleed Guard */}
-        <div className={`space-y-0.5 transition-opacity ${skipColorCleanup ? 'opacity-40 pointer-events-none' : ''}`}>
-          <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-            <div className="flex items-center gap-2">
-              <span>Bleed Guard</span>
-              <button onClick={() => toggleInfo('bleed')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+          <div className={`space-y-2 transition-opacity ${disablePostProcessing ? 'opacity-40 pointer-events-none' : ''}`}>
+            {/* Denoise */}
+            <div className="space-y-0.5">
+              <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+                <div className="flex items-center gap-2">
+                  <span>Denoise</span>
+                  <button onClick={() => toggleInfo('denoise')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+                </div>
+                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{denoiseRadius === 0 ? "OFF" : denoiseRadius + "px"}</span>
+              </div>
+              <input type="range" min="0" max="3" step="1" value={denoiseRadius} onChange={(e) => setDenoiseRadius(parseInt(e.target.value))} className="custom-slider" />
+              {activeInfo === 'denoise' && (
+                <InfoBox>
+                  Applies a median filter to remove JPEG artifacts and noise speckles before processing colors.
+                </InfoBox>
+              )}
             </div>
-            <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{edgeProtection === 0 ? "OFF" : edgeProtection + "%"}</span>
-          </div>
-          <input type="range" min="0" max="100" step="10" value={edgeProtection} onChange={(e) => setEdgeProtection(parseInt(e.target.value))} className="custom-slider" />
-          {activeInfo === 'bleed' && (
-            <InfoBox>
-              Prevents colors from bleeding into each other at boundaries. Higher values keep edges sharper but may leave jagged lines.
-            </InfoBox>
-          )}
-        </div>
 
-        {/* Sub-Pixel */}
-        <div className={`space-y-0.5 transition-opacity ${skipColorCleanup ? 'opacity-40 pointer-events-none' : ''}`}>
-          <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-            <div className="flex items-center gap-2">
-              <span>Sub-Pixel</span>
-              <button onClick={() => toggleInfo('subpixel')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+            {/* Bleed Guard */}
+            <div className="space-y-0.5">
+              <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+                <div className="flex items-center gap-2">
+                  <span>Bleed Guard</span>
+                  <button onClick={() => toggleInfo('bleed')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+                </div>
+                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{edgeProtection === 0 ? "OFF" : edgeProtection + "%"}</span>
+              </div>
+              <input type="range" min="0" max="100" step="10" value={edgeProtection} onChange={(e) => setEdgeProtection(parseInt(e.target.value))} className="custom-slider" />
+              {activeInfo === 'bleed' && (
+                <InfoBox>
+                  Prevents colors from bleeding into each other at boundaries. Higher values keep edges sharper but may leave jagged lines.
+                </InfoBox>
+              )}
             </div>
-            <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{smoothingLevels === 0 ? "OFF" : smoothingLevels === 1 ? "OPT" : "ULT"}</span>
+
+            {/* Sub-Pixel */}
+            <div className="space-y-0.5">
+              <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+                <div className="flex items-center gap-2">
+                  <span>Sub-Pixel</span>
+                  <button onClick={() => toggleInfo('subpixel')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+                </div>
+                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{smoothingLevels === 0 ? "OFF" : smoothingLevels === 1 ? "OPT" : "ULT"}</span>
+              </div>
+              <input type="range" min="0" max="2" step="1" value={smoothingLevels} onChange={(e) => setSmoothingLevels(parseInt(e.target.value))} className="custom-slider" />
+              {activeInfo === 'subpixel' && (
+                <InfoBox>
+                  Adds anti-aliasing to smooth out jagged edges.
+                  <br />• OPT: Standard smoothing
+                  <br />• ULT: Ultra-fine blending
+                </InfoBox>
+              )}
+            </div>
           </div>
-          <input type="range" min="0" max="2" step="1" value={smoothingLevels} onChange={(e) => setSmoothingLevels(parseInt(e.target.value))} className="custom-slider" />
-          {activeInfo === 'subpixel' && (
-            <InfoBox>
-              Adds anti-aliasing to smooth out jagged edges.
-              <br />• OPT: Standard smoothing
-              <br />• ULT: Ultra-fine blending
-            </InfoBox>
-          )}
         </div>
       </div>
 
-      <div className={`border-t border-[#333]/10 pt-2 transition-opacity duration-300 ${skipColorCleanup ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      <div className="border-t border-[#333]/10 pt-2 transition-all duration-300">
         <div className="mb-1.5">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-[12px] uppercase font-bold text-[#333] m-0 tracking-wide">Color Mapping</h3>
-            <button onClick={onAddManualLayer} className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a]">
+          <div className="flex items-center justify-between mb-1 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setDisableRecoloring(!disableRecoloring)}
+                className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disableRecoloring ? 'bg-[#333]' : 'bg-slate-300'}`}
+              >
+                <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disableRecoloring ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+              <h3 className={`text-[10px] uppercase font-bold m-0 tracking-wide ${disableRecoloring ? 'text-slate-400' : 'text-[#333]'}`}>Color Mapping</h3>
+            </div>
+
+            <button onClick={onAddManualLayer} disabled={disableRecoloring} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}>
               <i className="fa-solid fa-plus mr-1"></i> Add
             </button>
           </div>
@@ -188,7 +199,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-col gap-1 pr-1">
+        <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
           {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
           {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
             const id = (item as any).id;

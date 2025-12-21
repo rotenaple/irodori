@@ -28,7 +28,9 @@ const App: React.FC = () => {
   const [upscaleFactor, setUpscaleFactor] = useState<number | 'NS'>('NS');
   const [denoiseRadius, setDenoiseRadius] = useState<number>(0);
   const [edgeProtection, setEdgeProtection] = useState<number>(50);
-  const [skipColorCleanup, setSkipColorCleanup] = useState<boolean>(false);
+  const [disableRecoloring, setDisableRecoloring] = useState<boolean>(false);
+  const [disablePostProcessing, setDisablePostProcessing] = useState<boolean>(false);
+  const [disableScaling, setDisableScaling] = useState<boolean>(false);
 
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
@@ -142,7 +144,7 @@ const App: React.FC = () => {
   }, []);
 
   const processImage = async () => {
-    if (!image || (!skipColorCleanup && palette.length === 0) || !sourceImageRef.current || !workerRef.current) return;
+    if (!image || (!disableRecoloring && palette.length === 0) || !sourceImageRef.current || !workerRef.current) return;
     setProcessingState('processing');
 
     // Give UI a moment to update state
@@ -162,8 +164,9 @@ const App: React.FC = () => {
           upscaleFactor,
           denoiseRadius,
           edgeProtection,
-          skipColorCleanup,
-          scaling: 1, // Not strictly used in new logic, but kept for type compat if needed
+          disablePostProcessing,
+          disableRecoloring,
+          disableScaling,
           palette,
           enabledGroups: Array.from(enabledGroups),
           selectedInGroup,
@@ -230,8 +233,12 @@ const App: React.FC = () => {
               onRemoveManualLayer={removeManualLayer}
               onEditTarget={(id, type) => setEditTarget({ id, type })}
               paletteLength={palette.length}
-              skipColorCleanup={skipColorCleanup}
-              setSkipColorCleanup={setSkipColorCleanup}
+              disableScaling={disableScaling}
+              setDisableScaling={setDisableScaling}
+              disablePostProcessing={disablePostProcessing}
+              setDisablePostProcessing={setDisablePostProcessing}
+              disableRecoloring={disableRecoloring}
+              setDisableRecoloring={setDisableRecoloring}
             />
           </div>
 
@@ -240,7 +247,7 @@ const App: React.FC = () => {
             <div className="flex flex-row gap-2">
               <button
                 onClick={processImage}
-                disabled={!image || (!skipColorCleanup && palette.length === 0) || processingState === 'processing'}
+                disabled={!image || (!disableRecoloring && palette.length === 0) || processingState === 'processing'}
                 className="flex-1 bg-[#333] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[12px] shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none hover:bg-black flex items-center justify-center gap-2"
               >
                 {processingState === 'processing' ? (
