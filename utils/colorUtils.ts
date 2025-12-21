@@ -31,16 +31,25 @@ export const sigmoidSnap = (r: number, k: number = 12): number => {
 
 export const findClosestColor = (pixel: ColorRGB, palette: PaletteColor[], coreWeight: number = 1.0): PaletteColor => {
   if (palette.length === 0) return { r: 0, g: 0, b: 0, hex: '#000000', id: 'default' };
-  let minDistance = Infinity;
-  let closestColor = palette[0];
 
-  for (const color of palette) {
-    let distance = getColorDistance(pixel, color);
+  let minDistanceSq = Infinity;
+  let closestColor = palette[0];
+  const { r, g, b } = pixel; // Destructure once
+
+  for (let i = 0; i < palette.length; i++) {
+    const color = palette[i];
+    // Inline squared distance calculation to avoid function call overhead and sqrt
+    let distSq = (r - color.r) ** 2 + (g - color.g) ** 2 + (b - color.b) ** 2;
+
+    // Applying weight effectively means dealing with distance, so we square the weight for squared distance comparison
     if (color.id.startsWith('group-')) {
-      distance *= coreWeight;
+      // approximate: if we want to weight the distance, typically we multiply the distance.
+      // d' = d * w => d'^2 = d^2 * w^2
+      distSq *= (coreWeight * coreWeight);
     }
-    if (distance < minDistance) {
-      minDistance = distance;
+
+    if (distSq < minDistanceSq) {
+      minDistanceSq = distSq;
       closestColor = color;
     }
   }
@@ -49,9 +58,9 @@ export const findClosestColor = (pixel: ColorRGB, palette: PaletteColor[], coreW
 
 export const blendColors = (c1: ColorRGB, c2: ColorRGB, ratio: number): ColorRGB => {
   return {
-    r: Math.round(c1.r * (1 - ratio) + c2.r * ratio),
-    g: Math.round(c1.g * (1 - ratio) + c2.g * ratio),
-    b: Math.round(c1.b * (1 - ratio) + c2.b * ratio),
+    r: Math.round(c1.r + (c2.r - c1.r) * ratio),
+    g: Math.round(c1.g + (c2.g - c1.g) * ratio),
+    b: Math.round(c1.b + (c2.b - c1.b) * ratio),
   };
 };
 
@@ -59,30 +68,51 @@ export const applyMedianFilter = (imageData: ImageData, radius: number = 1): Ima
   const { width, height, data } = imageData;
   const output = new ImageData(new Uint8ClampedArray(data), width, height);
   const outData = output.data;
+  const windowSize = (2 * radius + 1) ** 2;
+  const mid = Math.floor(windowSize / 2);
+
+  // Reusable arrays to avoid allocation in loop
+  const rs = new Uint8Array(windowSize);
+  const gs = new Uint8Array(windowSize);
+  const bs = new Uint8Array(windowSize);
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const rs: number[] = [];
-      const gs: number[] = [];
-      const bs: number[] = [];
+      let count = 0;
 
       for (let dy = -radius; dy <= radius; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+
+        const yOffset = ny * width;
         for (let dx = -radius; dx <= radius; dx++) {
-          const nx = Math.min(width - 1, Math.max(0, x + dx));
-          const ny = Math.min(height - 1, Math.max(0, y + dy));
-          const idx = (ny * width + nx) * 4;
-          rs.push(data[idx]);
-          gs.push(data[idx + 1]);
-          bs.push(data[idx + 2]);
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+
+          const idx = (yOffset + nx) * 4;
+          rs[count] = data[idx];
+          gs[count] = data[idx + 1];
+          bs[count] = data[idx + 2];
+          count++;
         }
       }
 
-      const mid = Math.floor(rs.length / 2);
-      const sort = (a: number, b: number) => a - b;
+      // Fill remaining if window was clipped (edge case), though usually we just sort valid pixels
+      // For simplicity/speed on edges, we just use what we gathered.
+      // A full quickselect is faster for variable sizes, but for small fixed kernels (3x3, 5x5),
+      // a simple sort is often acceptable if we avoid array creation overhead.
+      // Since 'count' < windowSize at edges, we sort only the valid portion.
+
+      const validRs = rs.subarray(0, count).sort();
+      const validGs = gs.subarray(0, count).sort();
+      const validBs = bs.subarray(0, count).sort();
+      const midIdx = Math.floor(count / 2);
+
       const outIdx = (y * width + x) * 4;
-      outData[outIdx] = rs.sort(sort)[mid];
-      outData[outIdx + 1] = gs.sort(sort)[mid];
-      outData[outIdx + 2] = bs.sort(sort)[mid];
+      outData[outIdx] = validRs[midIdx];
+      outData[outIdx + 1] = validGs[midIdx];
+      outData[outIdx + 2] = validBs[midIdx];
+      outData[outIdx + 3] = data[outIdx + 3]; // Preserve alpha
     }
   }
   return output;

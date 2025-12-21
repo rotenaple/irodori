@@ -108,212 +108,66 @@ const App: React.FC = () => {
     return p;
   }, [selectedInGroup, enabledGroups, colorOverrides]);
 
+  // Worker reference
+  const workerRef = useRef<Worker | null>(null);
+
+  useEffect(() => {
+    // Initialize worker
+    workerRef.current = new Worker(new URL('./imageProcessor.worker.ts', import.meta.url), { type: 'module' });
+
+    workerRef.current.onmessage = (e: MessageEvent<import('./types').WorkerResponse>) => {
+      const { type, result, error } = e.data;
+      if (type === 'complete') {
+        if (result) {
+          setProcessedSize(result.size);
+          setProcessedImage(URL.createObjectURL(result));
+          setProcessingState('completed');
+          setActiveTab('processed');
+        } else if (error) {
+          console.error("Worker error:", error);
+          setProcessingState('idle'); // or error state
+          alert(`Error processing image: ${error}`);
+        }
+      }
+    };
+
+    return () => {
+      workerRef.current?.terminate();
+    };
+  }, []);
+
   const processImage = async () => {
-    if (!image || (!skipColorCleanup && palette.length === 0) || !sourceImageRef.current) return;
+    if (!image || (!skipColorCleanup && palette.length === 0) || !sourceImageRef.current || !workerRef.current) return;
     setProcessingState('processing');
+
+    // Give UI a moment to update state
     await new Promise(resolve => setTimeout(resolve, 50));
 
     const img = sourceImageRef.current;
-    const nativeWidth = img.naturalWidth;
-    const nativeHeight = img.naturalHeight;
 
-    let targetUpscale = 1;
-    if (upscaleFactor === 'NS') {
-      const longNative = Math.max(nativeWidth, nativeHeight);
-      const shortNative = Math.min(nativeWidth, nativeHeight);
-      const scaleA = Math.min(535 / longNative, 355 / shortNative);
-      const scaleB = Math.min(568 / longNative, 321 / shortNative);
-      targetUpscale = Math.max(scaleA, scaleB);
-    } else {
-      targetUpscale = upscaleFactor as number;
-    }
+    // Create ImageBitmap to transfer to worker
+    // Note: This is faster than structured cloning ImageData but requires everything to be async
+    try {
+      const imageBitmap = await createImageBitmap(img);
 
-    const nativeCanvas = document.createElement('canvas');
-    nativeCanvas.width = nativeWidth;
-    nativeCanvas.height = nativeHeight;
-    const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true });
-    if (!nCtx) return;
-    nCtx.drawImage(img, 0, 0);
-
-    let baseData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight);
-    if (denoiseRadius > 0) baseData = applyMedianFilter(baseData, denoiseRadius);
-    nCtx.putImageData(baseData, 0, 0);
-
-    // Bypass color quantization if requested
-    if (skipColorCleanup) {
-      const finalW = Math.round(nativeWidth * targetUpscale);
-      const finalH = Math.round(nativeHeight * targetUpscale);
-
-      const finalCanvas = document.createElement('canvas');
-      finalCanvas.width = finalW;
-      finalCanvas.height = finalH;
-      const fCtx = finalCanvas.getContext('2d');
-      if (fCtx) {
-        fCtx.imageSmoothingEnabled = true;
-        fCtx.imageSmoothingQuality = 'high';
-        fCtx.drawImage(nativeCanvas, 0, 0, finalW, finalH);
-
-        finalCanvas.toBlob((blob) => {
-          if (blob) {
-            setProcessedSize(blob.size);
-            setProcessedImage(URL.createObjectURL(blob));
-            setProcessingState('completed');
-            setActiveTab('processed');
-          }
-        }, 'image/png');
-      }
-      return;
-    }
-
-    const workspaceScale = targetUpscale * 4;
-    const workspaceWidth = Math.round(nativeWidth * workspaceScale);
-    const workspaceHeight = Math.round(nativeHeight * workspaceScale);
-
-    const MAX_PIXELS = 10000000;
-    const currentPixels = workspaceWidth * workspaceHeight;
-    const safeScale = currentPixels > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
-
-    const finalWorkspaceWidth = Math.round(nativeWidth * safeScale);
-    const finalWorkspaceHeight = Math.round(nativeHeight * safeScale);
-
-    const workspaceCanvas = document.createElement('canvas');
-    workspaceCanvas.width = finalWorkspaceWidth;
-    workspaceCanvas.height = finalWorkspaceHeight;
-    const wCtx = workspaceCanvas.getContext('2d', { willReadFrequently: true });
-    if (!wCtx) return;
-
-    wCtx.imageSmoothingEnabled = true;
-    wCtx.imageSmoothingQuality = 'high';
-    wCtx.drawImage(nativeCanvas, 0, 0, finalWorkspaceWidth, finalWorkspaceHeight);
-
-    const pixelData = wCtx.getImageData(0, 0, finalWorkspaceWidth, finalWorkspaceHeight).data;
-    const matchPalette: PaletteColor[] = [];
-    enabledGroups.forEach(id => {
-      const hex = selectedInGroup[id];
-      matchPalette.push({ ...hexToRgb(hex)!, hex, id });
-    });
-
-    const outputData = new Uint8ClampedArray(pixelData.length);
-    let coreIdxMap = new Int16Array(finalWorkspaceWidth * finalWorkspaceHeight);
-
-    for (let i = 0; i < pixelData.length; i += 4) {
-      const pixel = { r: pixelData[i], g: pixelData[i + 1], b: pixelData[i + 2] };
-      const closest = findClosestColor(pixel, matchPalette);
-      coreIdxMap[i / 4] = matchPalette.findIndex(p => p.id === closest.id);
-    }
-
-    if (edgeProtection > 0) {
-      let radius = 1;
-      let iterations = 1;
-      if (edgeProtection > 33) { radius = 2; iterations = 2; }
-      if (edgeProtection > 66) { radius = 3; iterations = 3; }
-      if (edgeProtection > 85) { radius = 4; iterations = 5; }
-
-      let tempIdxMap = new Int16Array(coreIdxMap.length);
-      for (let iter = 0; iter < iterations; iter++) {
-        for (let y = 0; y < finalWorkspaceHeight; y++) {
-          for (let x = 0; x < finalWorkspaceWidth; x++) {
-            const idx = y * finalWorkspaceWidth + x;
-            const counts: Record<number, number> = {};
-            let maxCount = 0;
-            let dominantIdx = coreIdxMap[idx];
-
-            for (let dy = -radius; dy <= radius; dy++) {
-              for (let dx = -radius; dx <= radius; dx++) {
-                const ny = y + dy;
-                const nx = x + dx;
-                if (ny >= 0 && ny < finalWorkspaceHeight && nx >= 0 && nx < finalWorkspaceWidth) {
-                  const nIdx = coreIdxMap[ny * finalWorkspaceWidth + nx];
-                  counts[nIdx] = (counts[nIdx] || 0) + 1;
-                  if (counts[nIdx] > maxCount) {
-                    maxCount = counts[nIdx];
-                    dominantIdx = nIdx;
-                  }
-                }
-              }
-            }
-            tempIdxMap[idx] = dominantIdx;
-          }
+      workerRef.current.postMessage({
+        type: 'process',
+        imageBitmap,
+        parameters: {
+          upscaleFactor,
+          denoiseRadius,
+          edgeProtection,
+          skipColorCleanup,
+          scaling: 1, // Not strictly used in new logic, but kept for type compat if needed
+          palette,
+          enabledGroups: Array.from(enabledGroups),
+          selectedInGroup,
+          smoothingLevels
         }
-        coreIdxMap.set(tempIdxMap);
-      }
-    }
-
-    for (let y = 0; y < finalWorkspaceHeight; y++) {
-      for (let x = 0; x < finalWorkspaceWidth; x++) {
-        const idx = y * finalWorkspaceWidth + x;
-        const coreIdx = coreIdxMap[idx];
-        let neighborIndices = new Set<number>();
-
-        if (smoothingLevels > 0) {
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue;
-              const nx = x + dx, ny = y + dy;
-              if (nx >= 0 && nx < finalWorkspaceWidth && ny >= 0 && ny < finalWorkspaceHeight) {
-                const ni = coreIdxMap[ny * finalWorkspaceWidth + nx];
-                if (ni !== coreIdx) neighborIndices.add(ni);
-              }
-            }
-          }
-        }
-
-        let finalColor: PaletteColor;
-        if (neighborIndices.size === 0 || smoothingLevels === 0) {
-          finalColor = palette[coreIdx];
-        } else {
-          const currentPixel = { r: pixelData[idx * 4], g: pixelData[idx * 4 + 1], b: pixelData[idx * 4 + 2] };
-          const candidates: PaletteColor[] = [matchPalette[coreIdx]];
-          const steps = Math.pow(2, smoothingLevels) - 1;
-
-          neighborIndices.forEach(ni => {
-            candidates.push(matchPalette[ni]);
-            const contrast = getColorDistance(matchPalette[coreIdx], matchPalette[ni]);
-            const sharpFactor = contrast > 120 ? 18 : 10;
-            for (let s = 1; s <= steps; s++) {
-              const sr = sigmoidSnap(s / (steps + 1), sharpFactor);
-              const b = blendColors(matchPalette[coreIdx], matchPalette[ni], sr);
-              candidates.push({ ...b, hex: rgbToHex(b.r, b.g, b.b), id: `blend-${coreIdx}-${ni}-${s}` });
-            }
-          });
-
-          const winner = findClosestColor(currentPixel, candidates, 0.8);
-          if (winner.id.startsWith('blend-')) {
-            const parts = winner.id.split('-');
-            const i1 = parseInt(parts[1]), i2 = parseInt(parts[2]), s = parseInt(parts[3]);
-            const b = blendColors(palette[i1], palette[i2], sigmoidSnap(s / (steps + 1), 12));
-            finalColor = { ...b, hex: rgbToHex(b.r, b.g, b.b), id: winner.id };
-          } else {
-            finalColor = palette[matchPalette.findIndex(p => p.id === winner.id)];
-          }
-        }
-        const outIdx = idx * 4;
-        outputData[outIdx] = finalColor.r; outputData[outIdx + 1] = finalColor.g; outputData[outIdx + 2] = finalColor.b; outputData[outIdx + 3] = 255;
-      }
-    }
-
-    wCtx.putImageData(new ImageData(outputData, finalWorkspaceWidth, finalWorkspaceHeight), 0, 0);
-
-    const finalCanvas = document.createElement('canvas');
-    finalCanvas.width = Math.round(nativeWidth * targetUpscale);
-    finalCanvas.height = Math.round(nativeHeight * targetUpscale);
-
-    const fCtx = finalCanvas.getContext('2d');
-    if (fCtx) {
-      fCtx.fillStyle = '#000000';
-      fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
-      fCtx.imageSmoothingEnabled = true;
-      fCtx.imageSmoothingQuality = 'high';
-      fCtx.drawImage(workspaceCanvas, 0, 0, finalCanvas.width, finalCanvas.height);
-
-      finalCanvas.toBlob((blob) => {
-        if (blob) {
-          setProcessedSize(blob.size);
-          setProcessedImage(URL.createObjectURL(blob));
-          setProcessingState('completed');
-          setActiveTab('processed');
-        }
-      }, 'image/png');
+      }, [imageBitmap]); // Transfer the bitmap
+    } catch (err) {
+      console.error("Failed to start worker:", err);
+      setProcessingState('idle');
     }
   };
 

@@ -23,3 +23,26 @@ export interface ColorGroup {
 }
 
 export type ProcessingState = 'idle' | 'processing' | 'completed';
+
+export type WorkerMessage = {
+  type: 'process';
+  imageBitmap: ImageBitmap;
+  parameters: {
+    upscaleFactor: number | 'NS';
+    denoiseRadius: number;
+    edgeProtection: number;
+    skipColorCleanup: boolean;
+    scaling: number;
+    palette: PaletteColor[];
+    enabledGroups: string[];
+    selectedInGroup: Record<string, string>;
+    smoothingLevels: number;
+  };
+};
+
+export type WorkerResponse = {
+  type: 'complete' | 'progress';
+  result?: Blob;
+  progress?: number;
+  error?: string;
+};
