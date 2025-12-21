@@ -35,6 +35,9 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
   const processedCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const targetPosRef = useRef<{ x: number, y: number } | null>(null);
+  const currentPosRef = useRef<{ x: number, y: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (processedImage && processedCanvasRef.current) {
@@ -51,14 +54,22 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
     }
   }, [processedImage]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (magnifierPos?.locked) return;
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
 
-    const container = containerRef.current;
-    if (!container) return;
-
-    const sourceCanvas = activeTab === 'original' ? canvasRef.current : processedCanvasRef.current;
-    if (!sourceCanvas) return;
+  const updateMagnifierState = useCallback((params: {
+    screenX: number,
+    screenY: number,
+    container: HTMLDivElement,
+    sourceCanvas: HTMLCanvasElement
+  }) => {
+    const { screenX, screenY, container, sourceCanvas } = params;
 
     const rect = container.getBoundingClientRect();
     const cw = rect.width;
@@ -72,8 +83,8 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
     const ox = (cw - dw) / 2;
     const oy = (ch - dh) / 2;
 
-    const relMouseX = e.clientX - rect.left - ox;
-    const relMouseY = e.clientY - rect.top - oy;
+    const relMouseX = screenX - rect.left - ox;
+    const relMouseY = screenY - rect.top - oy;
 
     const px = Math.floor(relMouseX / scale);
     const py = Math.floor(relMouseY / scale);
@@ -83,20 +94,89 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
       const pixel = sourceCanvas.getContext('2d', { willReadFrequently: true })?.getImageData(px, py, 1, 1).data;
       if (pixel) currentHex = rgbToHex(pixel[0], pixel[1], pixel[2]);
 
-      setMagnifierPos({
-        screenX: e.clientX,
-        screenY: e.clientY,
+      return {
+        screenX,
+        screenY,
         locked: false,
         hex: currentHex,
         px,
         py,
         sourceWidth: sw,
         sourceHeight: sh
-      });
-    } else {
-      setMagnifierPos(null);
+      };
     }
-  }, [magnifierPos?.locked, activeTab, canvasRef]);
+    return null;
+  }, []);
+
+  const animate = useCallback(() => {
+    if (!targetPosRef.current || !containerRef.current) return;
+
+    if (!currentPosRef.current) {
+      currentPosRef.current = { ...targetPosRef.current };
+    }
+
+    const target = targetPosRef.current;
+    const current = currentPosRef.current;
+
+    // Linear interpolation (lerp) for smooth movement
+    const lerpFactor = 0.15;
+    const dx = target.x - current.x;
+    const dy = target.y - current.y;
+
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+      current.x = target.x;
+      current.y = target.y;
+    } else {
+      current.x += dx * lerpFactor;
+      current.y += dy * lerpFactor;
+    }
+
+    const container = containerRef.current;
+    const sourceCanvas = activeTab === 'original' ? canvasRef.current : processedCanvasRef.current;
+
+    if (container && sourceCanvas) {
+      const newState = updateMagnifierState({
+        screenX: current.x,
+        screenY: current.y,
+        container,
+        sourceCanvas
+      });
+
+      // Preserve locked state if we are just animating movement
+      setMagnifierPos(prev => {
+        if (prev?.locked) return prev; // Don't update if locked
+        return newState;
+      });
+    }
+
+    if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+      rafRef.current = requestAnimationFrame(animate);
+    } else {
+      rafRef.current = null;
+    }
+  }, [activeTab, canvasRef, updateMagnifierState]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (magnifierPos?.locked) return;
+
+    targetPosRef.current = { x: e.clientX, y: e.clientY };
+
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(animate);
+    }
+  }, [magnifierPos?.locked, animate]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (!magnifierPos?.locked) {
+      setMagnifierPos(null);
+      targetPosRef.current = null;
+      currentPosRef.current = null;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    }
+  }, [magnifierPos?.locked]);
 
   const handleAdd = () => {
     if (magnifierPos) {
@@ -179,7 +259,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
             ref={containerRef}
             className="w-full h-auto md:h-full relative mb-8 md:mb-0"
             onMouseMove={handleMouseMove}
-            onMouseLeave={() => !magnifierPos?.locked && setMagnifierPos(null)}
+            onMouseLeave={handleMouseLeave}
           >
             <div className="w-full h-auto md:h-full flex items-center justify-center">
               <canvas
