@@ -5,6 +5,8 @@ import {
   hexToRgb,
   findClosestColor,
   extractColorGroups,
+  extractSvgColors,
+  recolorSvg,
   blendColors,
   sigmoidSnap,
   applyMedianFilter,
@@ -23,11 +25,14 @@ const App: React.FC = () => {
   const [manualLayerIds, setManualLayerIds] = useState<string[]>([]);
   const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({});
   const [originalFileName, setOriginalFileName] = useState<string>('image');
+  const [isSvg, setIsSvg] = useState<boolean>(false);
+  const [svgContent, setSvgContent] = useState<string | null>(null);
 
-  const [smoothingLevels, setSmoothingLevels] = useState<number>(1);
+  const [smoothingLevels, setSmoothingLevels] = useState<number>(50);
   const [upscaleFactor, setUpscaleFactor] = useState<number | 'NS'>('NS');
   const [denoiseRadius, setDenoiseRadius] = useState<number>(0);
   const [edgeProtection, setEdgeProtection] = useState<number>(50);
+  const [vertexInertia, setVertexInertia] = useState<number>(100);
   const [disableRecoloring, setDisableRecoloring] = useState<boolean>(false);
   const [disablePostProcessing, setDisablePostProcessing] = useState<boolean>(false);
   const [disableScaling, setDisableScaling] = useState<boolean>(false);
@@ -48,6 +53,23 @@ const App: React.FC = () => {
     if (file) {
       setOriginalFileName(file.name);
       setOriginalSize(file.size);
+      const isFileSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+      setIsSvg(isFileSvg);
+
+      if (isFileSvg) {
+        const textReader = new FileReader();
+        textReader.onload = (event) => {
+          setSvgContent(event.target?.result as string);
+        };
+        textReader.readAsText(file);
+
+        // Disable scaling and post-processing for SVGs automatically
+        setDisableScaling(true);
+        setDisablePostProcessing(true);
+      } else {
+        setSvgContent(null);
+      }
+
       const reader = new FileReader();
       reader.onload = (event) => {
         setImage(event.target?.result as string);
@@ -69,14 +91,32 @@ const App: React.FC = () => {
       const img = new Image();
       img.src = image;
       img.onload = () => {
+        let drawWidth = img.width;
+        let drawHeight = img.height;
+
+        // For SVGs, if dimensions are not set, they might be 0 or small.
+        // We want a reasonable resolution for the magnifier and preview canvas.
+        if (isSvg && (drawWidth === 0 || drawHeight === 0 || drawWidth < 100)) {
+          const aspect = img.naturalWidth / img.naturalHeight || 1;
+          drawWidth = 2000; // Arbitrary high res for vector
+          drawHeight = 2000 / aspect;
+        }
+
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = img.width;
-        tempCanvas.height = img.height;
+        tempCanvas.width = drawWidth;
+        tempCanvas.height = drawHeight;
         const ctx = tempCanvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          const imageData = ctx.getImageData(0, 0, img.width, img.height);
-          const result = extractColorGroups(imageData);
+          ctx.drawImage(img, 0, 0, drawWidth, drawHeight);
+          const imageData = ctx.getImageData(0, 0, drawWidth, drawHeight);
+
+          let result;
+          if (isSvg && svgContent) {
+            result = extractSvgColors(svgContent);
+          } else {
+            result = extractColorGroups(imageData);
+          }
+
           setColorGroups(result.groups.slice(0, 10));
 
           const initialSelections: Record<string, string> = {};
@@ -90,14 +130,14 @@ const App: React.FC = () => {
         }
 
         if (canvasRef.current) {
-          canvasRef.current.width = img.width;
-          canvasRef.current.height = img.height;
+          canvasRef.current.width = drawWidth;
+          canvasRef.current.height = drawHeight;
           const mainCtx = canvasRef.current.getContext('2d');
-          if (mainCtx) mainCtx.drawImage(img, 0, 0);
+          if (mainCtx) mainCtx.drawImage(img, 0, 0, drawWidth, drawHeight);
         }
       };
     }
-  }, [image]);
+  }, [image, isSvg, svgContent]);
 
   const palette = useMemo(() => {
     const p: PaletteColor[] = [];
@@ -150,6 +190,21 @@ const App: React.FC = () => {
     // Give UI a moment to update state
     await new Promise(resolve => setTimeout(resolve, 50));
 
+    if (isSvg && svgContent) {
+      try {
+        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides);
+        const blob = new Blob([recoloredSvgContent], { type: 'image/svg+xml' });
+        setProcessedSize(blob.size);
+        setProcessedImage(URL.createObjectURL(blob));
+        setProcessingState('completed');
+        setActiveTab('processed');
+      } catch (err) {
+        console.error("Failed to process SVG:", err);
+        setProcessingState('idle');
+      }
+      return;
+    }
+
     const img = sourceImageRef.current;
 
     // Create ImageBitmap to transfer to worker
@@ -170,7 +225,8 @@ const App: React.FC = () => {
           palette,
           enabledGroups: Array.from(enabledGroups),
           selectedInGroup,
-          smoothingLevels
+          smoothingLevels,
+          vertexInertia
         }
       }, [imageBitmap]); // Transfer the bitmap
     } catch (err) {
@@ -203,7 +259,12 @@ const App: React.FC = () => {
       // Extract basename and append suffix
       const dotIndex = originalFileName.lastIndexOf('.');
       const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
-      link.download = `${baseName}-irodori.png`;
+
+      if (isSvg) {
+        link.download = `${baseName}-irodori.svg`;
+      } else {
+        link.download = `${baseName}-irodori.png`;
+      }
 
       link.click();
     }
@@ -225,6 +286,7 @@ const App: React.FC = () => {
               denoiseRadius={denoiseRadius} setDenoiseRadius={setDenoiseRadius}
               smoothingLevels={smoothingLevels} setSmoothingLevels={setSmoothingLevels}
               edgeProtection={edgeProtection} setEdgeProtection={setEdgeProtection}
+              vertexInertia={vertexInertia} setVertexInertia={setVertexInertia}
               image={image} onImageUpload={handleImageUpload}
               colorGroups={colorGroups} manualLayerIds={manualLayerIds}
               selectedInGroup={selectedInGroup} enabledGroups={enabledGroups} setEnabledGroups={setEnabledGroups}
@@ -239,6 +301,7 @@ const App: React.FC = () => {
               setDisablePostProcessing={setDisablePostProcessing}
               disableRecoloring={disableRecoloring}
               setDisableRecoloring={setDisableRecoloring}
+              isSvg={isSvg}
             />
           </div>
 
@@ -278,6 +341,7 @@ const App: React.FC = () => {
               originalSize={originalSize} processedSize={processedSize}
               canvasRef={canvasRef}
               onAddFromMagnifier={addManualLayer}
+              isSvg={isSvg}
             />
           </div>
         </section>
@@ -293,12 +357,21 @@ const App: React.FC = () => {
                 ? (selectedInGroup[editTarget.id] || '#ffffff')
                 : (colorOverrides[editTarget.id] || selectedInGroup[editTarget.id] || '#ffffff')
             }
-            suggestions={editTarget.type === 'original' ? colorGroups.find(g => g.id === editTarget.id)?.members.map(m => m.hex) : []}
+            suggestions={editTarget.type === 'original' ? colorGroups.find(g => g.id === editTarget.id)?.members : []}
+            showNoneOption={editTarget.type === 'recolor'}
             onChange={(hex) => {
               if (editTarget.type === 'original') {
                 setSelectedInGroup(prev => ({ ...prev, [editTarget.id]: hex }));
               } else {
-                setColorOverrides(prev => ({ ...prev, [editTarget.id]: hex }));
+                if (hex === '') {
+                  setColorOverrides(prev => {
+                    const next = { ...prev };
+                    delete next[editTarget.id];
+                    return next;
+                  });
+                } else {
+                  setColorOverrides(prev => ({ ...prev, [editTarget.id]: hex }));
+                }
               }
             }}
             onClose={() => setEditTarget(null)}

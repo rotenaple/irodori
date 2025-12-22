@@ -1,7 +1,7 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { rgbToHex, hexToRgb, HTML_COLORS } from '../utils/colorUtils';
 import { PALETTES } from '../constants/palettes';
+import { ColorInstance } from '../types';
 
 interface ColorPickerModalProps {
   currentHex: string;
@@ -9,10 +9,13 @@ interface ColorPickerModalProps {
   onClose: () => void;
   title: string;
   mode: 'spectrum' | 'sampled';
-  suggestions?: string[];
+  suggestions?: (string | ColorInstance)[];
+  showNoneOption?: boolean;
 }
 
-export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, onChange, onClose, title, mode, suggestions = [] }) => {
+export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
+  currentHex, onChange, onClose, title, mode, suggestions = [], showNoneOption = false
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [paletteTab, setPaletteTab] = useState<'classic' | 'bright'>('classic');
 
@@ -62,10 +65,25 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, 
 
   const processedSuggestions = useMemo(() => {
     if (mode !== 'sampled') return [];
-    const uniqueHexes = Array.from(new Set(suggestions.map(s => s.toLowerCase())));
-    return uniqueHexes.map(hex => ({
-      hex,
-      name: HTML_COLORS[hex] || null
+
+    // Normalize suggestions to ColorInstance-like objects
+    const normalized = suggestions.map(s => {
+      if (typeof s === 'string') {
+        return { hex: s.toLowerCase(), percentage: undefined, score: undefined };
+      }
+      return { hex: s.hex.toLowerCase(), percentage: s.percentage, score: s.score };
+    });
+
+    const seen = new Set<string>();
+    const unique = normalized.filter(s => {
+      if (seen.has(s.hex)) return false;
+      seen.add(s.hex);
+      return true;
+    });
+
+    return unique.map(s => ({
+      ...s,
+      name: HTML_COLORS[s.hex] || null
     })).slice(0, 30);
   }, [mode, suggestions]);
 
@@ -136,7 +154,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, 
                 {PALETTES[paletteTab].map(p => (
                   <button key={p.hex} onClick={() => onChange(p.hex)} className={`group p-1.5 rounded-lg border transition-all h-full flex flex-col ${currentHex.toLowerCase() === p.hex.toLowerCase() ? 'border-slate-400 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={p.name}>
                     <div className="w-full aspect-square rounded-md shadow-sm border border-black/5 mb-1.5 shrink-0" style={{ backgroundColor: p.hex }} />
-                    <div className="text-[9px] font-bold text-slate-500 text-center leading-3 uppercase w-full break-words">{p.name}</div>
+                    <div className="text-[10px] font-bold text-slate-500 text-center leading-3 uppercase w-full break-words">{p.name}</div>
                   </button>
                 ))}
               </div>
@@ -149,8 +167,19 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, 
               <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-8 gap-3">
                 {processedSuggestions.map((s, idx) => (
                   <button key={idx} onClick={() => onChange(s.hex)} className={`group p-1.5 rounded-xl border transition-all ${currentHex.toLowerCase() === s.hex.toLowerCase() ? 'border-[#333]/20 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={s.name || s.hex}>
-                    <div className="w-full aspect-square rounded-lg mb-1 shadow-sm border border-black/5" style={{ backgroundColor: s.hex }} />
-                    <div className="text-[9px] font-mono text-center text-slate-500 group-hover:text-slate-700 truncate">{s.name || s.hex.toUpperCase()}</div>
+                    <div className="w-full aspect-square rounded-lg mb-1 shadow-sm border border-black/5 relative group" style={{ backgroundColor: s.hex }}>
+                      {s.percentage !== undefined && (
+                        <div className="absolute -top-1 -right-1 bg-white/90 backdrop-blur-sm border border-slate-200 px-1 rounded text-[9px] font-bold text-slate-600 shadow-sm opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                          {Math.round(s.percentage)}%
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-[10px] font-mono text-center text-slate-500 group-hover:text-slate-700 truncate leading-tight">
+                      {s.name || s.hex.toUpperCase()}
+                      {s.percentage !== undefined && (
+                        <div className="text-[9px] font-bold text-slate-400 mt-0.5">{Math.round(s.percentage)}%</div>
+                      )}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -164,8 +193,20 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ currentHex, 
         )}
       </div>
 
-      <div className="p-5 border-t border-slate-100 bg-slate-50/50">
-        <button onClick={onClose} className="w-full bg-[#333] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[11px] shadow-lg active:scale-[0.98] transition-all hover:bg-black flex items-center justify-center gap-2">
+      <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex items-center gap-3">
+        {showNoneOption && (
+          <button
+            onClick={() => {
+              onChange('');
+              onClose();
+            }}
+            className="h-11 px-4 bg-white text-red-500 border border-red-100 rounded-xl font-bold uppercase tracking-widest text-[9px] shadow-sm active:scale-[0.98] transition-all hover:bg-red-50 flex items-center justify-center gap-2 whitespace-nowrap"
+            title="Cancel Recolor (Use original color)"
+          >
+            Reset
+          </button>
+        )}
+        <button onClick={onClose} className="flex-1 bg-[#333] text-white rounded-xl h-11 font-bold uppercase tracking-widest text-[11px] shadow-lg active:scale-[0.98] transition-all hover:bg-black flex items-center justify-center gap-2">
           <i className="fa-solid fa-check"></i> Apply Color
         </button>
       </div>

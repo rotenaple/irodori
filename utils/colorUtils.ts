@@ -138,6 +138,54 @@ export const extractColorGroups = (imageData: ImageData, distanceThreshold: numb
     totalSamples++;
   }
 
+  return processFrequencyMap(frequencyMap, totalSamples, distanceThreshold);
+};
+
+export const extractSvgColors = (svgContent: string): ExtractionResult => {
+  const frequencyMap: Record<string, number> = {};
+  let totalSamples = 0;
+
+  // 1. Find all Hex colors
+  const hexRegex = /#(?:[0-9a-fA-F]{3}){1,2}\b/g;
+  let match;
+  while ((match = hexRegex.exec(svgContent)) !== null) {
+    let hex = match[0].toLowerCase();
+    if (hex.length === 4) { // #abc -> #aabbcc
+      hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    }
+    frequencyMap[hex] = (frequencyMap[hex] || 0) + 1;
+    totalSamples++;
+  }
+
+  // 2. Find all rgb colors
+  const rgbRegex = /rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/g;
+  while ((match = rgbRegex.exec(svgContent)) !== null) {
+    const hex = rgbToHex(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
+    frequencyMap[hex] = (frequencyMap[hex] || 0) + 1;
+    totalSamples++;
+  }
+
+  // 3. Find named colors
+  const nameToHex: Record<string, string> = {};
+  for (const [hex, name] of Object.entries(HTML_COLORS)) {
+    nameToHex[name.toLowerCase()] = hex;
+  }
+
+  const colorAttrRegex = /(?:fill|stroke|stop-color|color)\s*[:=]\s*["']?([a-zA-Z]+)["']?/g;
+  while ((match = colorAttrRegex.exec(svgContent)) !== null) {
+    const name = match[1].toLowerCase();
+    if (nameToHex[name]) {
+      const hex = nameToHex[name];
+      frequencyMap[hex] = (frequencyMap[hex] || 0) + 1;
+      totalSamples++;
+    }
+  }
+
+  // For SVGs, we use a much tighter distance threshold as colors are usually intentional
+  return processFrequencyMap(frequencyMap, totalSamples, 15);
+};
+
+const processFrequencyMap = (frequencyMap: Record<string, number>, totalSamples: number, distanceThreshold: number): ExtractionResult => {
   const sortedColors = Object.entries(frequencyMap)
     .sort(([, a], [, b]) => b - a)
     .map(([hex, count]) => ({ hex, rgb: hexToRgb(hex)!, count }));
@@ -164,15 +212,85 @@ export const extractColorGroups = (imageData: ImageData, distanceThreshold: numb
     }
   }
 
+  // Post-process groups to calculate percentages and representative scores
+  for (const group of groups) {
+    // Calculate percentages
+    for (const member of group.members) {
+      member.percentage = (member.count / group.totalCount) * 100;
+    }
+
+    // Calculate representative score for each member
+    // Score = Sum over all members j of (member[j].count / (1 + distance_ij))
+    for (let i = 0; i < group.members.length; i++) {
+      let score = 0;
+      const mI = group.members[i];
+      for (let j = 0; j < group.members.length; j++) {
+        const mJ = group.members[j];
+        const dist = getColorDistance(mI.rgb, mJ.rgb);
+        // We use a weighted contribution: frequency of j weighted by proximity to i
+        // This favors dense areas and high frequency.
+        score += mJ.count / (1 + dist);
+      }
+      mI.score = score;
+    }
+
+    // Sort members by score descending
+    group.members.sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+
   const minFrequency = totalSamples * 0.01;
   const filteredGroups = groups
     .filter(g => g.totalCount > minFrequency)
     .sort((a, b) => b.totalCount - a.totalCount);
-
   return {
     groups: filteredGroups,
     totalSamples
   };
+};
+
+export const recolorSvg = (svgContent: string, colorGroups: ColorGroup[], colorOverrides: Record<string, string>): string => {
+  // Create a mapping from any found color string to its new target hex
+  const colorToTarget: Record<string, string> = {};
+
+  for (const group of colorGroups) {
+    const target = colorOverrides[group.id];
+    if (target) {
+      for (const member of group.members) {
+        colorToTarget[member.hex.toLowerCase()] = target;
+      }
+    }
+  }
+
+  // Replace hex colors
+  let newSvg = svgContent.replace(/#(?:[0-9a-fA-F]{3}){1,2}\b/g, (match) => {
+    let hex = match.toLowerCase();
+    if (hex.length === 4) {
+      hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    }
+    return colorToTarget[hex] || match;
+  });
+
+  // Replace rgb colors
+  newSvg = newSvg.replace(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/g, (match, r, g, b) => {
+    const hex = rgbToHex(parseInt(r), parseInt(g), parseInt(b));
+    return colorToTarget[hex] || match;
+  });
+
+  // Replace named colors
+  const nameToHex: Record<string, string> = {};
+  for (const [hex, name] of Object.entries(HTML_COLORS)) {
+    nameToHex[name.toLowerCase()] = hex;
+  }
+
+  newSvg = newSvg.replace(/((?:fill|stroke|stop-color|color)\s*[:=]\s*["']?)([a-zA-Z]+)(["']?)/g, (match, prefix, name, suffix) => {
+    const hex = nameToHex[name.toLowerCase()];
+    if (hex && colorToTarget[hex]) {
+      return prefix + colorToTarget[hex] + suffix;
+    }
+    return match;
+  });
+
+  return newSvg;
 };
 
 export const HTML_COLORS: Record<string, string> = {

@@ -21,6 +21,8 @@ interface ControlPanelProps {
   setDenoiseRadius: (v: number) => void;
   smoothingLevels: number;
   setSmoothingLevels: (v: number) => void;
+  vertexInertia: number;
+  setVertexInertia: (v: number) => void;
   edgeProtection: number;
   setEdgeProtection: (v: number) => void;
 
@@ -45,19 +47,22 @@ interface ControlPanelProps {
   setDisablePostProcessing: (v: boolean) => void;
   disableRecoloring: boolean;
   setDisableRecoloring: (v: boolean) => void;
+  isSvg: boolean;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   upscaleFactor, setUpscaleFactor,
   denoiseRadius, setDenoiseRadius,
   smoothingLevels, setSmoothingLevels,
+  vertexInertia, setVertexInertia,
   edgeProtection, setEdgeProtection,
   image, onImageUpload, colorGroups, manualLayerIds,
   selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget,
   disableScaling, setDisableScaling,
   disablePostProcessing, setDisablePostProcessing,
-  disableRecoloring, setDisableRecoloring
+  disableRecoloring, setDisableRecoloring,
+  isSvg
 }) => {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
 
@@ -87,7 +92,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="space-y-0.5">
           <div className="flex justify-between items-center bg-slate-50 p-1 rounded-lg border border-slate-200 mb-1">
             <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 ${disableScaling ? 'text-slate-400' : 'text-[#333]'}`}>Target Scale</span>
+              <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 ${disableScaling ? 'text-slate-400' : 'text-[#333]'}`}>Output Size</span>
               <button onClick={() => toggleInfo('scale')} className="text-[#33569a] hover:opacity-70"><i className="fa-solid fa-circle-info"></i></button>
             </div>
             <span className={`font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px] ${disableScaling ? 'text-slate-400' : 'text-[#33569a]'}`}>{upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}</span>
@@ -97,13 +102,20 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             {[1, 2, 4].map(f => (
               <button key={f} onClick={() => setUpscaleFactor(f as number)} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === f ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>{f}X</button>
             ))}
-            <button onClick={() => setUpscaleFactor('NS')} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === 'NS' ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>NS</button>
+            <button onClick={() => setUpscaleFactor('NS')} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === 'NS' ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>Auto</button>
           </div>
-          {activeInfo === 'scale' && (
+          {isSvg && activeInfo === 'scale' && (
             <InfoBox>
-              Auto-scales to NationStates standard sizes:<br />
-              • A-ratio: 535x355px<br />
-              • B-ratio: 568x321px
+              <div className="flex items-center gap-2 text-amber-600 font-bold mb-1">
+                <i className="fa-solid fa-triangle-exclamation"></i>
+                <span>SVG detected</span>
+              </div>
+              Scaling is disabled; SVGs maintain infinite resolution.
+            </InfoBox>
+          )}
+          {!isSvg && activeInfo === 'scale' && (
+            <InfoBox>
+              Resizes to NationStates dimensions (535x355px or 568x321px).
             </InfoBox>
           )}
         </div>
@@ -117,15 +129,27 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             >
               <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disablePostProcessing ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
-            <span className={`text-[10px] font-bold uppercase tracking-wide ${disablePostProcessing ? 'text-slate-400' : 'text-[#333]'}`}>Post-Processing</span>
+            <span className={`text-[10px] font-bold uppercase tracking-wide ${disablePostProcessing ? 'text-slate-400' : 'text-[#333]'}`}>Cleanup & Quality</span>
+            {isSvg && (
+              <button onClick={() => toggleInfo('svg-pp')} className="text-amber-500 hover:opacity-70 ml-auto"><i className="fa-solid fa-circle-info"></i></button>
+            )}
           </div>
+          {isSvg && activeInfo === 'svg-pp' && (
+            <InfoBox>
+              <div className="flex items-center gap-2 text-amber-600 font-bold mb-1">
+                <i className="fa-solid fa-triangle-exclamation"></i>
+                <span>SVG detected</span>
+              </div>
+              Processing is disabled to preserve original vector precision.
+            </InfoBox>
+          )}
 
           <div className={`space-y-2 transition-opacity ${disablePostProcessing ? 'opacity-40 pointer-events-none' : ''}`}>
             {/* Denoise */}
             <div className="space-y-0.5">
               <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
                 <div className="flex items-center gap-2">
-                  <span>Denoise</span>
+                  <span>Remove Noise</span>
                   <button onClick={() => toggleInfo('denoise')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
                 </div>
                 <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{denoiseRadius === 0 ? "OFF" : denoiseRadius + "px"}</span>
@@ -133,7 +157,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               <input type="range" min="0" max="3" step="1" value={denoiseRadius} onChange={(e) => setDenoiseRadius(parseInt(e.target.value))} className="custom-slider" />
               {activeInfo === 'denoise' && (
                 <InfoBox>
-                  Applies a median filter to remove JPEG artifacts and noise speckles before processing colors.
+                  Removes grain and compression artifacts from the source image.
                 </InfoBox>
               )}
             </div>
@@ -142,7 +166,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <div className="space-y-0.5">
               <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
                 <div className="flex items-center gap-2">
-                  <span>Bleed Guard</span>
+                  <span>Edge Crispness</span>
                   <button onClick={() => toggleInfo('bleed')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
                 </div>
                 <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{edgeProtection === 0 ? "OFF" : edgeProtection + "%"}</span>
@@ -150,26 +174,49 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               <input type="range" min="0" max="100" step="10" value={edgeProtection} onChange={(e) => setEdgeProtection(parseInt(e.target.value))} className="custom-slider" />
               {activeInfo === 'bleed' && (
                 <InfoBox>
-                  Prevents colors from bleeding into each other at boundaries. Higher values keep edges sharper but may leave jagged lines.
+                  Tightens color boundaries. High values prevent bleeding but may increase jaggedness.
                 </InfoBox>
               )}
             </div>
 
-            {/* Sub-Pixel */}
+            {/* Vertex Inertia */}
             <div className="space-y-0.5">
               <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
                 <div className="flex items-center gap-2">
-                  <span>Sub-Pixel</span>
+                  <span>Corner Protection</span>
+                  <button onClick={() => toggleInfo('inertia')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+                </div>
+                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{vertexInertia === 0 ? "OFF" : vertexInertia + "%"}</span>
+              </div>
+              <input type="range" min="0" max="100" step="10" value={vertexInertia} onChange={(e) => setVertexInertia(parseInt(e.target.value))} className="custom-slider" />
+              {activeInfo === 'inertia' && (
+                <InfoBox>
+                  Preserves sharp vertices. High values protect geometric details; low values favor curves.
+                </InfoBox>
+              )}
+            </div>
+
+            {/* Smooth Edges */}
+            <div className="space-y-0.5">
+              <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+                <div className="flex items-center gap-2">
+                  <span>Edge Smoothing</span>
                   <button onClick={() => toggleInfo('subpixel')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
                 </div>
-                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{smoothingLevels === 0 ? "OFF" : smoothingLevels === 1 ? "OPT" : "ULT"}</span>
+                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{smoothingLevels === 0 ? "OFF" : smoothingLevels + "%"}</span>
               </div>
-              <input type="range" min="0" max="2" step="1" value={smoothingLevels} onChange={(e) => setSmoothingLevels(parseInt(e.target.value))} className="custom-slider" />
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={smoothingLevels}
+                onChange={(e) => setSmoothingLevels(parseInt(e.target.value))}
+                className="custom-slider"
+              />
               {activeInfo === 'subpixel' && (
                 <InfoBox>
-                  Adds anti-aliasing to smooth out jagged edges.
-                  <br />• OPT: Standard smoothing
-                  <br />• ULT: Ultra-fine blending
+                  Applies anti-aliasing. High values produce softer transitions; low values keep edges crisp.
                 </InfoBox>
               )}
             </div>
@@ -195,7 +242,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </button>
           </div>
           <p className="text-[10px] text-slate-500 leading-tight">
-            Map source colors (left) to clean target colors (right). Uncheck to exclude noise.
+            Choose which colors to keep from your image (left). Uncheck a row to treat it as background noise, or pick a new color on the right if you wish to change it.
           </p>
         </div>
 

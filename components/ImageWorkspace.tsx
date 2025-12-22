@@ -12,6 +12,7 @@ interface ImageWorkspaceProps {
   processedSize: number;
   canvasRef: React.RefObject<HTMLCanvasElement>;
   onAddFromMagnifier: (hex: string) => void;
+  isSvg: boolean;
 }
 
 const MAGNIFIER_SIZE = 245;
@@ -20,7 +21,8 @@ const VISUAL_PIXEL_SIZE = MAGNIFIER_SIZE / ZOOM_PIXELS;
 
 export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   image, processedImage, activeTab, setActiveTab,
-  originalSize, processedSize, canvasRef, onAddFromMagnifier
+  originalSize, processedSize, canvasRef, onAddFromMagnifier,
+  isSvg
 }) => {
   const [magnifierPos, setMagnifierPos] = useState<{
     screenX: number,
@@ -265,8 +267,16 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
               <canvas
                 ref={canvasRef}
                 onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
-                className={`w-full h-auto md:h-full object-contain ${activeTab === 'original' ? 'block' : 'hidden'} cursor-crosshair drop-shadow-xl`}
+                className={`w-full h-auto md:h-full object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair drop-shadow-xl`}
               />
+              {image && isSvg && activeTab === 'original' && (
+                <img
+                  src={image}
+                  onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
+                  alt="Original"
+                  className="w-full h-auto md:h-full object-contain drop-shadow-xl block cursor-crosshair"
+                />
+              )}
               {processedImage && activeTab === 'processed' && (
                 <img
                   src={processedImage}

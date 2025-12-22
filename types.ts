@@ -15,6 +15,8 @@ export interface ColorInstance {
   hex: string;
   rgb: ColorRGB;
   count: number;
+  percentage?: number;
+  score?: number;
 }
 
 export interface ColorGroup {
@@ -39,7 +41,9 @@ export type WorkerMessage = {
     enabledGroups: string[];
     selectedInGroup: Record<string, string>;
     smoothingLevels: number;
+    vertexInertia: number;
   };
+  svgContent?: string;
 };
 
 export type WorkerResponse = {
