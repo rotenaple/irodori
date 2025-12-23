@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { PaletteColor, ProcessingState, ColorGroup } from './types';
+import { PaletteColor, ProcessingState, ColorGroup, ColorInstance } from './types';
 import {
   rgbToHex,
   hexToRgb,
@@ -44,6 +44,10 @@ const App: React.FC = () => {
   const [processedSize, setProcessedSize] = useState<number>(0);
 
   const [editTarget, setEditTarget] = useState<{ id: string, type: 'original' | 'recolor' } | null>(null);
+  const [hoveredColor, setHoveredColor] = useState<string | null>(null);
+  const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+  const [fullColorList, setFullColorList] = useState<ColorInstance[]>([]);
+  const [totalSamples, setTotalSamples] = useState<number>(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sourceImageRef = useRef<HTMLImageElement>(null);
@@ -94,11 +98,9 @@ const App: React.FC = () => {
         let drawWidth = img.width;
         let drawHeight = img.height;
 
-        // For SVGs, if dimensions are not set, they might be 0 or small.
-        // We want a reasonable resolution for the magnifier and preview canvas.
         if (isSvg && (drawWidth === 0 || drawHeight === 0 || drawWidth < 100)) {
           const aspect = img.naturalWidth / img.naturalHeight || 1;
-          drawWidth = 2000; // Arbitrary high res for vector
+          drawWidth = 2000;
           drawHeight = 2000 / aspect;
         }
 
@@ -110,19 +112,30 @@ const App: React.FC = () => {
           ctx.drawImage(img, 0, 0, drawWidth, drawHeight);
           const imageData = ctx.getImageData(0, 0, drawWidth, drawHeight);
 
-          let result;
+          let extractionResult;
           if (isSvg && svgContent) {
-            result = extractSvgColors(svgContent);
+            extractionResult = extractSvgColors(svgContent);
           } else {
-            result = extractColorGroups(imageData);
+            extractionResult = extractColorGroups(imageData);
           }
 
-          setColorGroups(result.groups.slice(0, 10));
+          // Store the full set of unique colors for recomputation
+          const allFoundColors: ColorInstance[] = [];
+          extractionResult.groups.forEach((g: ColorGroup) => allFoundColors.push(...g.members));
+          setFullColorList(allFoundColors);
+          setTotalSamples(extractionResult.totalSamples);
+
+          // Initialize with default grouping
+          const initialGroups = extractionResult.groups.slice(0, 10).map((g: ColorGroup) => ({
+            ...g,
+            representativeHex: g.members[0].hex
+          }));
+          setColorGroups(initialGroups);
 
           const initialSelections: Record<string, string> = {};
           const initialEnabled = new Set<string>();
-          result.groups.slice(0, 6).forEach(g => {
-            initialSelections[g.id] = g.members[0].hex;
+          initialGroups.slice(0, 6).forEach((g: ColorGroup) => {
+            initialSelections[g.id] = g.representativeHex!;
             initialEnabled.add(g.id);
           });
           setSelectedInGroup(initialSelections);
@@ -138,6 +151,111 @@ const App: React.FC = () => {
       };
     }
   }, [image, isSvg, svgContent]);
+
+  const moveColorToGroup = (colorHex: string, sourceGroupId: string, targetGroupId: string | 'new') => {
+    setColorGroups(prev => {
+      let colorToMove: ColorInstance | undefined;
+
+      const nextGroups = prev.map(g => {
+        if (g.id === sourceGroupId) {
+          colorToMove = g.members.find(m => m.hex === colorHex);
+          const members = g.members.filter(m => m.hex !== colorHex);
+          const totalCount = members.reduce((sum, m) => sum + m.count, 0);
+          return {
+            ...g,
+            members,
+            totalCount
+          };
+        }
+        return g;
+      }).filter(g => g.members.length > 0 || manualLayerIds.includes(g.id));
+
+      if (!colorToMove) return prev;
+
+      if (targetGroupId === 'new') {
+        const newGroup: ColorGroup = {
+          id: `group-${Math.random().toString(36).substr(2, 5)}`,
+          members: [colorToMove],
+          totalCount: colorToMove.count,
+          representativeHex: colorToMove.hex
+        };
+        setEnabledGroups(prevEnabled => new Set(prevEnabled).add(newGroup.id));
+        setSelectedInGroup(prevSelected => ({ ...prevSelected, [newGroup.id]: colorToMove!.hex }));
+        return [...nextGroups, newGroup];
+      } else {
+        return nextGroups.map(g => {
+          if (g.id === targetGroupId) {
+            const members = [...g.members, colorToMove!];
+            return {
+              ...g,
+              members,
+              totalCount: members.reduce((sum, m) => sum + m.count, 0)
+            };
+          }
+          return g;
+        });
+      }
+    });
+  };
+
+  const mergeGroups = (sourceGroupId: string, targetGroupId: string) => {
+    if (sourceGroupId === targetGroupId) return;
+    setColorGroups(prev => {
+      const sourceGroup = prev.find(g => g.id === sourceGroupId);
+      if (!sourceGroup) return prev;
+
+      return prev.map(g => {
+        if (g.id === targetGroupId) {
+          const members = [...g.members, ...sourceGroup.members];
+          return {
+            ...g,
+            members,
+            totalCount: members.reduce((sum, m) => sum + m.count, 0)
+          };
+        }
+        return g;
+      }).filter(g => g.id !== sourceGroupId);
+    });
+    setEnabledGroups(prev => {
+      const next = new Set(prev);
+      next.delete(sourceGroupId);
+      return next;
+    });
+  };
+
+  const recomputeGroups = () => {
+    if (fullColorList.length === 0 || colorGroups.length === 0) return;
+
+    setColorGroups(prev => {
+      const representatives = prev.map(g => {
+        const hex = selectedInGroup[g.id] || g.representativeHex || (g.members[0]?.hex) || '#000000';
+        return { id: g.id, rgb: hexToRgb(hex)! };
+      });
+
+      const newGroups = prev.map(g => ({ ...g, members: [] as ColorInstance[], totalCount: 0 }));
+
+      fullColorList.forEach(color => {
+        let minDistance = Infinity;
+        let targetGroupId = representatives[0].id;
+
+        representatives.forEach(rep => {
+          const dist = getColorDistance(color.rgb, rep.rgb);
+          if (dist < minDistance) {
+            minDistance = dist;
+            targetGroupId = rep.id;
+          }
+        });
+
+        const targetGroup = newGroups.find(g => g.id === targetGroupId);
+        if (targetGroup) {
+          targetGroup.members.push(color);
+          targetGroup.totalCount += color.count;
+        }
+      });
+
+      return newGroups.filter(g => g.members.length > 0 || manualLayerIds.includes(g.id));
+    });
+  };
 
   const palette = useMemo(() => {
     const p: PaletteColor[] = [];
@@ -223,6 +341,7 @@ const App: React.FC = () => {
           disableRecoloring,
           disableScaling,
           palette,
+          colorGroups,
           enabledGroups: Array.from(enabledGroups),
           selectedInGroup,
           smoothingLevels,
@@ -294,6 +413,12 @@ const App: React.FC = () => {
               onAddManualLayer={() => addManualLayer()}
               onRemoveManualLayer={removeManualLayer}
               onEditTarget={(id, type) => setEditTarget({ id, type })}
+              onMoveColor={moveColorToGroup}
+              onMergeGroups={mergeGroups}
+              onRecomputeGroups={recomputeGroups}
+              setHoveredColor={setHoveredColor}
+              setHoveredGroupId={setHoveredGroupId}
+              totalSamples={totalSamples}
               paletteLength={palette.length}
               disableScaling={disableScaling}
               setDisableScaling={setDisableScaling}
@@ -341,6 +466,9 @@ const App: React.FC = () => {
               originalSize={originalSize} processedSize={processedSize}
               canvasRef={canvasRef}
               onAddFromMagnifier={addManualLayer}
+              hoveredColor={hoveredColor}
+              hoveredGroupId={hoveredGroupId}
+              colorGroups={colorGroups}
               isSvg={isSvg}
             />
           </div>

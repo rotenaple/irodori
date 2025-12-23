@@ -23,6 +23,7 @@ export interface ColorGroup {
   id: string;
   members: ColorInstance[];
   totalCount: number;
+  representativeHex?: string; // Cache the chosen representative or override
 }
 
 export type ProcessingState = 'idle' | 'processing' | 'completed';
@@ -38,6 +39,7 @@ export type WorkerMessage = {
     disableRecoloring: boolean;
     disableScaling: boolean;
     palette: PaletteColor[];
+    colorGroups?: ColorGroup[];
     enabledGroups: string[];
     selectedInGroup: Record<string, string>;
     smoothingLevels: number;

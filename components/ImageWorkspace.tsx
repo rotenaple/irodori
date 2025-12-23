@@ -12,6 +12,9 @@ interface ImageWorkspaceProps {
   processedSize: number;
   canvasRef: React.RefObject<HTMLCanvasElement>;
   onAddFromMagnifier: (hex: string) => void;
+  hoveredColor: string | null;
+  hoveredGroupId: string | null;
+  colorGroups: import('../types').ColorGroup[];
   isSvg: boolean;
 }
 
@@ -22,6 +25,7 @@ const VISUAL_PIXEL_SIZE = MAGNIFIER_SIZE / ZOOM_PIXELS;
 export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   image, processedImage, activeTab, setActiveTab,
   originalSize, processedSize, canvasRef, onAddFromMagnifier,
+  hoveredColor, hoveredGroupId, colorGroups,
   isSvg
 }) => {
   const [magnifierPos, setMagnifierPos] = useState<{
@@ -263,7 +267,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
           >
-            <div className="w-full h-auto md:h-full flex items-center justify-center">
+            <div className="w-full h-auto md:h-full flex items-center justify-center relative">
               <canvas
                 ref={canvasRef}
                 onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
@@ -283,6 +287,16 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Cleaned"
                   className="w-full h-auto md:h-full object-contain drop-shadow-xl block cursor-crosshair"
+                />
+              )}
+
+              {/* Highlight Palette Overlay */}
+              {(hoveredColor || hoveredGroupId) && activeTab === 'original' && canvasRef.current && (
+                <HighlightOverlay
+                  sourceCanvas={canvasRef.current}
+                  hoveredColor={hoveredColor}
+                  hoveredGroupId={hoveredGroupId}
+                  colorGroups={colorGroups}
                 />
               )}
             </div>
@@ -345,5 +359,76 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
       </div>
       <canvas ref={processedCanvasRef} className="hidden" />
     </div>
+  );
+};
+
+// --- Highlight Overlay Component ---
+interface HighlightOverlayProps {
+  sourceCanvas: HTMLCanvasElement;
+  hoveredColor: string | null;
+  hoveredGroupId: string | null;
+  colorGroups: import('../types').ColorGroup[];
+}
+
+const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hoveredColor, hoveredGroupId, colorGroups }) => {
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas || !sourceCanvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = sourceCanvas.width;
+    const height = sourceCanvas.height;
+    canvas.width = width;
+    canvas.height = height;
+
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sourceCtx) return;
+
+    const imageData = sourceCtx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const outputImageData = ctx.createImageData(width, height);
+    const outputData = outputImageData.data;
+
+    // Determine the set of hex colors to highlight
+    const highlightSet = new Set<string>();
+    if (hoveredColor) {
+      highlightSet.add(hoveredColor.toLowerCase());
+    } else if (hoveredGroupId) {
+      const group = colorGroups.find(g => g.id === hoveredGroupId);
+      group?.members.forEach(m => highlightSet.add(m.hex.toLowerCase()));
+    }
+
+    if (highlightSet.size === 0) return;
+
+    // Iterate through source image and mark matching pixels
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const hex = rgbToHex(r, g, b);
+
+      if (highlightSet.has(hex)) {
+        outputData[i] = 255;     // High contrast magenta for highlighting
+        outputData[i + 1] = 0;
+        outputData[i + 2] = 255;
+        outputData[i + 3] = 255;
+      } else {
+        outputData[i + 3] = 0;     // Transparent
+      }
+    }
+
+    ctx.putImageData(outputImageData, 0, 0);
+  }, [sourceCanvas, hoveredColor, hoveredGroupId, colorGroups]);
+
+  return (
+    <canvas
+      ref={overlayCanvasRef}
+      className="absolute inset-0 w-full h-auto md:h-full object-contain pointer-events-none z-10 animate-pulse-fast mix-blend-screen"
+      style={{ filter: 'drop-shadow(0 0 2px rgba(255,0,255,0.8))' }}
+    />
   );
 };

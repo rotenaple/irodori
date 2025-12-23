@@ -38,6 +38,12 @@ interface ControlPanelProps {
   onAddManualLayer: () => void;
   onRemoveManualLayer: (id: string) => void;
   onEditTarget: (id: string, type: 'original' | 'recolor') => void;
+  onMoveColor: (colorHex: string, sourceGroupId: string, targetGroupId: string | 'new') => void;
+  onMergeGroups: (sourceGroupId: string, targetGroupId: string) => void;
+  onRecomputeGroups: () => void;
+  setHoveredColor: (hex: string | null) => void;
+  setHoveredGroupId: (id: string | null) => void;
+  totalSamples: number;
 
   paletteLength: number;
 
@@ -58,7 +64,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   edgeProtection, setEdgeProtection,
   image, onImageUpload, colorGroups, manualLayerIds,
   selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
-  onAddManualLayer, onRemoveManualLayer, onEditTarget,
+  onAddManualLayer, onRemoveManualLayer, onEditTarget, onMoveColor,
+  onMergeGroups, onRecomputeGroups, setHoveredColor, setHoveredGroupId,
+  totalSamples,
   disableScaling, setDisableScaling,
   disablePostProcessing, setDisablePostProcessing,
   disableRecoloring, setDisableRecoloring,
@@ -224,39 +232,58 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      <div className="border-t border-[#333]/10 pt-2 transition-all duration-300">
-        <div className="mb-1.5">
-          <div className="flex items-center justify-between mb-1 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setDisableRecoloring(!disableRecoloring)}
-                className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disableRecoloring ? 'bg-[#333]' : 'bg-slate-300'}`}
-              >
-                <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disableRecoloring ? 'translate-x-4' : 'translate-x-0'}`} />
-              </button>
-              <h3 className={`text-[10px] uppercase font-bold m-0 tracking-wide ${disableRecoloring ? 'text-slate-400' : 'text-[#333]'}`}>Color Mapping</h3>
-            </div>
+      <div className="mb-1.5 px-0.5">
+        <div className="flex items-center justify-between mb-1 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDisableRecoloring(!disableRecoloring)}
+              className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disableRecoloring ? 'bg-[#333]' : 'bg-slate-300'}`}
+            >
+              <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disableRecoloring ? 'translate-x-4' : 'translate-x-0'}`} />
+            </button>
+            <h3 className={`text-[10px] uppercase font-bold m-0 tracking-wide ${disableRecoloring ? 'text-slate-400' : 'text-[#333]'}`}>Color Mapping</h3>
+          </div>
 
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onRecomputeGroups}
+              disabled={disableRecoloring || colorGroups.length === 0}
+              title="Reassign all image colors to nearest enabled group"
+              className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <i className="fa-solid fa-arrows-rotate mr-1"></i> Recompute
+            </button>
             <button onClick={onAddManualLayer} disabled={disableRecoloring} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}>
               <i className="fa-solid fa-plus mr-1"></i> Add
             </button>
           </div>
-          <p className="text-[10px] text-slate-500 leading-tight">
-            Choose which colors to keep from your image (left). Uncheck a row to treat it as background noise, or pick a new color on the right if you wish to change it.
-          </p>
         </div>
+        <p className="text-[10px] text-slate-500 leading-tight">
+          Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.
+        </p>
+      </div>
 
-        <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-          {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
-          {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
-            const id = (item as any).id;
-            const isManual = (item as any).isManual;
-            const isEnabled = enabledGroups.has(id);
-            const currentOriginal = selectedInGroup[id] || (item as ColorGroup).members?.[0].hex || '#ffffff';
-            const targetRecolor = colorOverrides[id];
+      <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+        {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
+        {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
+          const id = (item as any).id;
+          const isManual = (item as any).isManual;
+          const isEnabled = enabledGroups.has(id);
+          const group = item as ColorGroup;
+          const currentOriginal = selectedInGroup[id] || group.members?.[0]?.hex || '#ffffff';
+          const targetRecolor = colorOverrides[id];
+          const members = group.members || [];
 
-            return (
-              <div key={id} className={`p-1 rounded-xl border flex items-center gap-2 transition-all group ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'}`}>
+          const groupPercent = totalSamples > 0 ? ((group.totalCount / totalSamples) * 100).toFixed(1) : '0';
+
+          return (
+            <div
+              key={id}
+              className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'}`}
+              onMouseEnter={() => setHoveredGroupId(id)}
+              onMouseLeave={() => setHoveredGroupId(null)}
+            >
+              <div className="flex items-center gap-2">
                 <input type="checkbox" checked={isEnabled} onChange={() => {
                   setEnabledGroups(prev => {
                     const next = new Set(prev);
@@ -267,21 +294,20 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 }} className="w-3 h-3 rounded border-slate-300 accent-[#333] cursor-pointer shrink-0" />
 
                 <div className="flex-1 flex items-center gap-2 min-w-0">
-                  {/* Source Color - Takes available space */}
                   <button
                     onClick={() => onEditTarget(id, 'original')}
-                    className="flex-1 h-6 rounded-lg border border-black/5 shadow-inner relative group overflow-hidden transition-transform active:scale-[0.98]"
+                    className="flex-1 h-6 rounded-lg border border-black/5 shadow-inner relative group/btn overflow-hidden transition-transform active:scale-[0.98]"
                     style={{ backgroundColor: currentOriginal }}
-                    title="Source Color - Click to edit"
+                    title={`Group Area: ${groupPercent}% - Click to change anchor color`}
                   >
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/10 transition-opacity">
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/btn:opacity-100 bg-black/10 transition-opacity">
                       <span className="text-[8px] font-mono font-bold text-white drop-shadow-md bg-black/30 px-1 py-0.5 rounded backdrop-blur-[1px]">{currentOriginal.toUpperCase()}</span>
                     </div>
+                    <div className="absolute top-0 right-0 px-1 text-[7px] font-bold text-black/40 bg-white/40 rounded-bl-md backdrop-blur-[1px]">{groupPercent}%</div>
                   </button>
 
                   <i className="fa-solid fa-chevron-right text-[9px] text-slate-300 shrink-0"></i>
 
-                  {/* Target Color - Fixed size compact */}
                   <button
                     onClick={() => onEditTarget(id, 'recolor')}
                     className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] ${targetRecolor ? 'border-[#333]/20 shadow-sm' : 'border-dashed border-slate-300 hover:border-slate-400 bg-slate-50'}`}
@@ -292,15 +318,64 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   </button>
                 </div>
 
+                {/* Quick Merge Action (Simple version: click icon to select target or just a simple dropdown) */}
+                <div className="relative group/merge">
+                  <button className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-[#33569a] transition-colors">
+                    <i className="fa-solid fa-layer-group text-[9px]"></i>
+                  </button>
+                  <div className="absolute right-0 top-full mt-1 hidden group-hover/merge:flex flex-col bg-white border border-slate-200 rounded-lg shadow-xl z-[100] min-w-[120px] p-1">
+                    <div className="text-[8px] font-bold uppercase text-slate-400 px-2 py-1">Merge into...</div>
+                    {colorGroups.filter(g => g.id !== id).map(target => (
+                      <button
+                        key={target.id}
+                        onClick={() => onMergeGroups(id, target.id)}
+                        className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded transition-colors text-left"
+                      >
+                        <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0].hex }} />
+                        <span className="text-[9px] font-medium text-slate-600 truncate">Group {target.id.split('-')[1]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {isManual && (
                   <button onClick={() => onRemoveManualLayer(id)} className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors shrink-0">
                     <i className="fa-solid fa-times text-[9px]"></i>
                   </button>
                 )}
               </div>
-            );
-          })}
-        </div>
+
+              {members.length > 1 && (
+                <div className="flex flex-wrap gap-1 px-5 pb-1">
+                  {members.sort((a, b) => b.count - a.count).map(member => {
+                    const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
+                    return (
+                      <div
+                        key={member.hex}
+                        className="w-4 h-4 rounded-full border border-black/5 relative group/member cursor-pointer"
+                        style={{ backgroundColor: member.hex }}
+                        onMouseEnter={() => setHoveredColor(member.hex)}
+                        onMouseLeave={() => setHoveredColor(null)}
+                      >
+                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 hidden group-hover/member:flex flex-col items-center bg-[#333] text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-lg z-50 whitespace-nowrap">
+                          <span>{memberPercent}%</span>
+                          <div className="absolute top-full border-4 border-transparent border-t-[#333]"></div>
+                        </div>
+
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onMoveColor(member.hex, id, 'new'); }}
+                          className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-white shadow-md border border-slate-100 rounded-[4px] px-1 text-[7px] font-bold text-[#33569a] opacity-0 group-hover/member:opacity-100 transition-opacity z-20 whitespace-nowrap"
+                        >
+                          Ungroup
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

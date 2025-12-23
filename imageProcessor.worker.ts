@@ -81,10 +81,35 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const nativePixelData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight).data;
         let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
 
+        // Pre-create a flat mapping from all member colors to their group index
+        // This is more efficient for the initial pass
+        const colorToGroupIdx = new Map<string, number>();
+        parameters.palette.forEach((p, pIdx) => {
+            // Find the group this palette entry belongs to
+            const group = parameters.colorGroups?.find(g => g.id === p.id);
+            if (group) {
+                group.members.forEach(m => {
+                    colorToGroupIdx.set(m.hex.toLowerCase(), pIdx);
+                });
+            } else {
+                // For manual layers or groups without explicit members in the message, just use its own hex
+                colorToGroupIdx.set(p.hex.toLowerCase(), pIdx);
+            }
+        });
+
         for (let i = 0; i < nativePixelData.length; i += 4) {
-            const pixel = { r: nativePixelData[i], g: nativePixelData[i + 1], b: nativePixelData[i + 2] };
-            const closest = findClosestColor(pixel, matchPalette);
-            const pIdx = matchPalette.findIndex(p => p.id === closest.id);
+            const r = nativePixelData[i];
+            const g = nativePixelData[i + 1];
+            const b = nativePixelData[i + 2];
+            const hex = rgbToHex(r, g, b);
+
+            let pIdx = colorToGroupIdx.get(hex);
+            if (pIdx === undefined) {
+                const pixel = { r, g, b };
+                const closest = findClosestColor(pixel, matchPalette);
+                pIdx = matchPalette.findIndex(p => p.id === closest.id);
+            }
+
             lowResIdxMap[i / 4] = pIdx !== -1 ? pIdx : 0;
         }
 
