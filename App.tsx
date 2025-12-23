@@ -60,21 +60,11 @@ const App: React.FC = () => {
   // NEW: Logic for handling the View Button on mobile
   const handleMobileView = (id: string, type: 'group' | 'color') => {
     setMobileViewTarget(prev => {
-      // Constraint: Clicking any other view button overrides old view (Implicit in setting new state)
-
-      // Constraint: Subcolors are one-way switch (only on)
-      if (type === 'color') {
-        return { id, type };
-      }
-
-      // Groups act as a toggle if clicked twice
+      if (type === 'color') return { id, type };
       if (type === 'group') {
-        if (prev?.id === id && prev.type === 'group') {
-          return null; // Toggle off
-        }
+        if (prev?.id === id && prev.type === 'group') return null; // Toggle off
         return { id, type };
       }
-
       return { id, type };
     });
   };
@@ -89,11 +79,8 @@ const App: React.FC = () => {
 
       if (isFileSvg) {
         const textReader = new FileReader();
-        textReader.onload = (event) => {
-          setSvgContent(event.target?.result as string);
-        };
+        textReader.onload = (event) => setSvgContent(event.target?.result as string);
         textReader.readAsText(file);
-
         setDisableScaling(true);
         setDisablePostProcessing(true);
       } else {
@@ -111,7 +98,7 @@ const App: React.FC = () => {
         setManualLayerIds([]);
         setColorOverrides({});
         setActiveTab('original');
-        setMobileViewTarget(null); // Reset mobile view
+        setMobileViewTarget(null);
       };
       reader.readAsDataURL(file);
     }
@@ -151,8 +138,7 @@ const App: React.FC = () => {
           setFullColorList(allFoundColors);
           setTotalSamples(extractionResult.totalSamples);
 
-          // === THRESHOLD FILTERING APPLIED HERE ===
-          // Filter out groups that are less than 0.25% of the image
+          // === THRESHOLD FILTERING (0.25%) ===
           const THRESHOLD_PERCENT = 0.0025;
           const pixelThreshold = extractionResult.totalSamples * THRESHOLD_PERCENT;
 
@@ -189,17 +175,12 @@ const App: React.FC = () => {
   const moveColorToGroup = (colorHex: string, sourceGroupId: string, targetGroupId: string | 'new') => {
     setColorGroups(prev => {
       let colorToMove: ColorInstance | undefined;
-
       const nextGroups = prev.map(g => {
         if (g.id === sourceGroupId) {
           colorToMove = g.members.find(m => m.hex === colorHex);
           const members = g.members.filter(m => m.hex !== colorHex);
           const totalCount = members.reduce((sum, m) => sum + m.count, 0);
-          return {
-            ...g,
-            members,
-            totalCount
-          };
+          return { ...g, members, totalCount };
         }
         return g;
       }).filter(g => g.members.length > 0 || manualLayerIds.includes(g.id));
@@ -220,11 +201,7 @@ const App: React.FC = () => {
         return nextGroups.map(g => {
           if (g.id === targetGroupId) {
             const members = [...g.members, colorToMove!];
-            return {
-              ...g,
-              members,
-              totalCount: members.reduce((sum, m) => sum + m.count, 0)
-            };
+            return { ...g, members, totalCount: members.reduce((sum, m) => sum + m.count, 0) };
           }
           return g;
         });
@@ -234,7 +211,6 @@ const App: React.FC = () => {
 
   const mergeGroups = (sourceGroupId: string, targetGroupId: string) => {
     if (sourceGroupId === targetGroupId) return;
-
     let newRepresentative: string | undefined;
 
     setColorGroups(prev => {
@@ -246,27 +222,16 @@ const App: React.FC = () => {
           const members = [...g.members, ...sourceGroup.members];
           const sortedMembers = [...members].sort((a, b) => b.count - a.count);
           newRepresentative = sortedMembers[0].hex;
-
-          return {
-            ...g,
-            members,
-            totalCount: members.reduce((sum, m) => sum + m.count, 0),
-            representativeHex: newRepresentative
-          };
+          return { ...g, members, totalCount: members.reduce((sum, m) => sum + m.count, 0), representativeHex: newRepresentative };
         }
         return g;
       }).filter(g => g.id !== sourceGroupId);
-
       return updated;
     });
 
     if (newRepresentative) {
-      setSelectedInGroup(prev => ({
-        ...prev,
-        [targetGroupId]: newRepresentative!
-      }));
+      setSelectedInGroup(prev => ({ ...prev, [targetGroupId]: newRepresentative! }));
     }
-
     setEnabledGroups(prev => {
       const next = new Set(prev);
       next.delete(sourceGroupId);
@@ -276,19 +241,15 @@ const App: React.FC = () => {
 
   const recomputeGroups = () => {
     if (fullColorList.length === 0 || colorGroups.length === 0) return;
-
     setColorGroups(prev => {
       const representatives = prev.map(g => {
         const hex = selectedInGroup[g.id] || g.representativeHex || (g.members[0]?.hex) || '#000000';
         return { id: g.id, rgb: hexToRgb(hex)! };
       });
-
       const newGroups = prev.map(g => ({ ...g, members: [] as ColorInstance[], totalCount: 0 }));
-
       fullColorList.forEach(color => {
         let minDistance = Infinity;
         let targetGroupId = representatives[0].id;
-
         representatives.forEach(rep => {
           const dist = getColorDistance(color.rgb, rep.rgb);
           if (dist < minDistance) {
@@ -296,14 +257,12 @@ const App: React.FC = () => {
             targetGroupId = rep.id;
           }
         });
-
         const targetGroup = newGroups.find(g => g.id === targetGroupId);
         if (targetGroup) {
           targetGroup.members.push(color);
           targetGroup.totalCount += color.count;
         }
       });
-
       return newGroups.filter(g => g.members.length > 0 || manualLayerIds.includes(g.id));
     });
   };
@@ -314,12 +273,7 @@ const App: React.FC = () => {
       const baseHex = selectedInGroup[id];
       const targetHex = colorOverrides[id];
       const rgb = hexToRgb(baseHex);
-      if (rgb) p.push({
-        ...rgb,
-        hex: baseHex,
-        id,
-        targetHex: targetHex
-      });
+      if (rgb) p.push({ ...rgb, hex: baseHex, id, targetHex });
     });
     return p;
   }, [selectedInGroup, enabledGroups, colorOverrides]);
@@ -328,7 +282,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     workerRef.current = new Worker(new URL('./imageProcessor.worker.ts', import.meta.url), { type: 'module' });
-
     workerRef.current.onmessage = (e: MessageEvent<import('./types').WorkerResponse>) => {
       const { type, result, error } = e.data;
       if (type === 'complete') {
@@ -338,22 +291,17 @@ const App: React.FC = () => {
           setProcessingState('completed');
           setActiveTab('processed');
         } else if (error) {
-          console.error("Worker error:", error);
           setProcessingState('idle');
           alert(`Error processing image: ${error}`);
         }
       }
     };
-
-    return () => {
-      workerRef.current?.terminate();
-    };
+    return () => workerRef.current?.terminate();
   }, []);
 
   const processImage = async () => {
     if (!image || (!disableRecoloring && palette.length === 0) || !sourceImageRef.current || !workerRef.current) return;
     setProcessingState('processing');
-
     await new Promise(resolve => setTimeout(resolve, 50));
 
     if (isSvg && svgContent) {
@@ -365,17 +313,14 @@ const App: React.FC = () => {
         setProcessingState('completed');
         setActiveTab('processed');
       } catch (err) {
-        console.error("Failed to process SVG:", err);
         setProcessingState('idle');
       }
       return;
     }
 
     const img = sourceImageRef.current;
-
     try {
       const imageBitmap = await createImageBitmap(img);
-
       workerRef.current.postMessage({
         type: 'process',
         imageBitmap,
@@ -395,7 +340,6 @@ const App: React.FC = () => {
         }
       }, [imageBitmap]);
     } catch (err) {
-      console.error("Failed to start worker:", err);
       setProcessingState('idle');
     }
   };
@@ -422,33 +366,19 @@ const App: React.FC = () => {
       link.href = processedImage;
       const dotIndex = originalFileName.lastIndexOf('.');
       const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
-
-      if (isSvg) {
-        link.download = `${baseName}-irodori.svg`;
-      } else {
-        link.download = `${baseName}-irodori.png`;
-      }
-
+      if (isSvg) link.download = `${baseName}-irodori.svg`;
+      else link.download = `${baseName}-irodori.png`;
       link.click();
     }
   };
 
-  // Determine what is currently being hovered/viewed by combining Desktop Hover + Mobile View Selection
-  // Mobile selection takes priority
-  const effectiveHoveredGroupId = mobileViewTarget?.type === 'group'
-    ? mobileViewTarget.id
-    : hoveredGroupId;
-
-  const effectiveHoveredColor = mobileViewTarget?.type === 'color'
-    ? mobileViewTarget.id
-    : hoveredColor;
+  const effectiveHoveredGroupId = mobileViewTarget?.type === 'group' ? mobileViewTarget.id : hoveredGroupId;
+  const effectiveHoveredColor = mobileViewTarget?.type === 'color' ? mobileViewTarget.id : hoveredColor;
 
   return (
     <div className="h-full flex flex-col bg-white overflow-hidden">
       <Header />
-
       <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
-
         <aside className="w-full md:w-96 lg:w-[420px] px-0 md:pl-10 flex-none md:h-full border-r border-[#333]/5 bg-white flex flex-col relative z-10">
           <div className="px-4 md:px-6 py-4 overflow-y-auto md:overflow-y-auto custom-scrollbar flex-1 min-h-[400px] md:min-h-0">
             <h2 className="text-[11px] font-bold uppercase tracking-widest mb-2 text-[#333]/40 border-b border-[#333]/5 pb-1">Configurations</h2>
@@ -482,13 +412,10 @@ const App: React.FC = () => {
               disableRecoloring={disableRecoloring}
               setDisableRecoloring={setDisableRecoloring}
               isSvg={isSvg}
-              // Pass the Mobile View Logic to ControlPanel
-              // Note: You must update ControlPanel to use 'onMobileViewToggle' for its "View" buttons
               mobileViewTarget={mobileViewTarget}
               onMobileViewToggle={handleMobileView}
             />
           </div>
-
           <div className="px-4 md:px-6 py-4 z-20">
             <div className="flex flex-row gap-2">
               <button
@@ -496,49 +423,34 @@ const App: React.FC = () => {
                 disabled={!image || (!disableRecoloring && palette.length === 0) || processingState === 'processing'}
                 className="flex-1 bg-[#333] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[12px] shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none hover:bg-black flex items-center justify-center gap-2"
               >
-                {processingState === 'processing' ? (
-                  <><i className="fa-solid fa-circle-notch fa-spin"></i></>
-                ) : (
-                  <><i className="fa-solid fa-wand-magic-sparkles"></i> Apply</>
-                )}
+                {processingState === 'processing' ? <i className="fa-solid fa-circle-notch fa-spin"></i> : <><i className="fa-solid fa-wand-magic-sparkles"></i> Apply</>}
               </button>
-
               {processedImage && (
-                <button
-                  onClick={downloadImage}
-                  className="flex-1 bg-[#33569a] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[12px] shadow-lg active:scale-[0.98] transition-all hover:bg-[#25427a] flex items-center justify-center gap-2"
-                >
+                <button onClick={downloadImage} className="flex-1 bg-[#33569a] text-white rounded-xl py-3 font-bold uppercase tracking-widest text-[12px] shadow-lg active:scale-[0.98] transition-all hover:bg-[#25427a] flex items-center justify-center gap-2">
                   <i className="fa-solid fa-download"></i> Download
                 </button>
               )}
             </div>
           </div>
         </aside>
-
         <section className="flex-1 md:h-full pt-1 pb-10 px-4 md:pt-2 md:pb-2 md:pr-16 md:pl-6 flex flex-col bg-[#FAFAFA] min-w-0 border-l border-[#333]/5 min-h-[200px] md:min-h-0">
           <div className="flex-1 min-h-0">
-            {/* The Floating Dismiss Button has been REMOVED from here */}
             <ImageWorkspace
-              image={image}
-              processedImage={processedImage}
-              activeTab={activeTab}
-              setActiveTab={setActiveTab}
-              originalSize={originalSize}
-              processedSize={processedSize}
+              image={image} processedImage={processedImage}
+              activeTab={activeTab} setActiveTab={setActiveTab}
+              originalSize={originalSize} processedSize={processedSize}
               canvasRef={canvasRef}
               onAddFromMagnifier={addManualLayer}
               hoveredColor={effectiveHoveredColor}
               hoveredGroupId={effectiveHoveredGroupId}
               colorGroups={colorGroups}
               isSvg={isSvg}
-              // Pass the state and setter for the mobile view down to the workspace
               mobileViewTarget={mobileViewTarget}
               onClearMobileView={() => setMobileViewTarget(null)}
             />
           </div>
         </section>
       </main>
-
       {editTarget && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm" onClick={() => setEditTarget(null)}>
           <ColorPickerModal
@@ -552,25 +464,16 @@ const App: React.FC = () => {
             suggestions={editTarget.type === 'original' ? colorGroups.find(g => g.id === editTarget.id)?.members : []}
             showNoneOption={editTarget.type === 'recolor'}
             onChange={(hex) => {
-              if (editTarget.type === 'original') {
-                setSelectedInGroup(prev => ({ ...prev, [editTarget.id]: hex }));
-              } else {
-                if (hex === '') {
-                  setColorOverrides(prev => {
-                    const next = { ...prev };
-                    delete next[editTarget.id];
-                    return next;
-                  });
-                } else {
-                  setColorOverrides(prev => ({ ...prev, [editTarget.id]: hex }));
-                }
+              if (editTarget.type === 'original') setSelectedInGroup(prev => ({ ...prev, [editTarget.id]: hex }));
+              else {
+                if (hex === '') setColorOverrides(prev => { const next = { ...prev }; delete next[editTarget.id]; return next; });
+                else setColorOverrides(prev => ({ ...prev, [editTarget.id]: hex }));
               }
             }}
             onClose={() => setEditTarget(null)}
           />
         </div>
       )}
-
       <img ref={sourceImageRef} src={image || ''} className="hidden" alt="Source" />
     </div>
   );
