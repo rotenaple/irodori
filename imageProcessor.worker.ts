@@ -32,16 +32,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // determine target scale
         let targetUpscale = 1;
         if (!disableScaling) {
-            if (upscaleFactor === 'NS') {
-                const longNative = Math.max(nativeWidth, nativeHeight);
-                const shortNative = Math.min(nativeWidth, nativeHeight);
-                const scaleA = Math.min(535 / longNative, 355 / shortNative);
-                const scaleB = Math.min(568 / longNative, 321 / shortNative);
-                targetUpscale = Math.max(scaleA, scaleB);
-            } else {
-                targetUpscale = upscaleFactor as number;
-            }
-        }
+                    if (upscaleFactor === 'NS') {
+                        // Check if the image is Horizontal (Landscape) or Vertical (Portrait)
+                        const isLandscape = nativeWidth >= nativeHeight;
+
+                        if (isLandscape) {
+                            // Horizontal: Fit into 535x355
+                            targetUpscale = Math.min(535 / nativeWidth, 355 / nativeHeight);
+                        } else {
+                            // Vertical: Fit into 321x568
+                            targetUpscale = Math.min(321 / nativeWidth, 568 / nativeHeight);
+                        }
+                    } else {
+                        targetUpscale = upscaleFactor as number;
+                    }
+                }
 
         const nativeCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
         const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true });
