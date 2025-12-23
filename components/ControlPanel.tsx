@@ -1,15 +1,13 @@
-
 import React, { useState, useEffect } from 'react';
 import { ColorGroup } from '../types';
 
-// Moved outside and explicitly typed to resolve children property inference issues
+// InfoBox component for tooltips
 interface InfoBoxProps {
   children: React.ReactNode;
 }
 
-// Fix: Moved InfoBox outside of ControlPanel and used React.FC to ensure proper children type inference
 const InfoBox: React.FC<InfoBoxProps> = ({ children }) => (
-  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 mt-2 shadow-sm">
+  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 mt-2 shadow-sm animate-in fade-in zoom-in duration-200">
     {children}
   </div>
 );
@@ -57,6 +55,10 @@ interface ControlPanelProps {
   disableRecoloring: boolean;
   setDisableRecoloring: (v: boolean) => void;
   isSvg: boolean;
+
+  // NEW: Mobile View Logic Props
+  mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
+  onMobileViewToggle: (id: string, type: 'group' | 'color') => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -74,7 +76,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   disableScaling, setDisableScaling,
   disablePostProcessing, setDisablePostProcessing,
   disableRecoloring, setDisableRecoloring,
-  isSvg
+  isSvg,
+  mobileViewTarget,
+  onMobileViewToggle
 }) => {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
@@ -304,10 +308,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           const groupPercent = totalSamples > 0 ? ((group.totalCount / totalSamples) * 100).toFixed(1) : '0';
           const isDropTarget = draggedItem && draggedItem.groupId !== id;
 
+          // Check for active mobile view states
+          const isGroupViewActive = mobileViewTarget?.id === id && mobileViewTarget?.type === 'group';
+
           return (
             <div
               key={id}
-              className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'} ${isDropTarget ? 'ring-2 ring-[#33569a] bg-[#33569a]/5' : ''}`}
+              className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'} ${isDropTarget ? 'ring-2 ring-[#33569a] bg-[#33569a]/5' : ''} ${isGroupViewActive ? 'ring-2 ring-[#33569a]/50 bg-blue-50' : ''}`}
               draggable={!isManual}
               onDragStart={(e) => {
                 if (!isManual) {
@@ -371,10 +378,18 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   </button>
                 </div>
 
-                {/* View in Image button */}
+                {/* View in Image button - Handles both Desktop Hover and Mobile Toggle */}
                 <button
-                  onClick={() => setHoveredGroupId(hoveredGroupId === id ? null : id)}
-                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors shrink-0 ${hoveredGroupId === id ? 'bg-[#33569a] text-white' : 'text-slate-300 hover:text-[#33569a] hover:bg-[#33569a]/10'}`}
+                  onClick={(e) => {
+                    if (isTouchDevice) {
+                      e.stopPropagation();
+                      onMobileViewToggle(id, 'group');
+                    } else {
+                      setHoveredGroupId(hoveredGroupId === id ? null : id);
+                    }
+                  }}
+                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors shrink-0 
+                    ${(hoveredGroupId === id || isGroupViewActive) ? 'bg-[#33569a] text-white' : 'text-slate-300 hover:text-[#33569a] hover:bg-[#33569a]/10'}`}
                   title="View in Image"
                 >
                   <i className="fa-solid fa-eye text-[9px]"></i>
@@ -420,6 +435,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   {members.sort((a, b) => b.count - a.count).map(member => {
                     const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
                     const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
+                    // Check if this subcolor is the active persistent view target
+                    const isSubcolorActive = mobileViewTarget?.id === member.hex && mobileViewTarget?.type === 'color';
 
                     return (
                       <div key={member.hex} className="relative">
@@ -434,7 +451,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                           onClick={(e) => {
                             e.stopPropagation();
                             if (isTouchDevice) {
-                              // Mobile: show popup
+                              // Mobile: show popup for options
                               setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent });
                             } else {
                               // Desktop: ungroup directly
@@ -443,10 +460,19 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                           }}
                           onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)}
                           onMouseLeave={() => !isTouchDevice && setHoveredColor(null)}
-                          className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member ${isPopupOpen ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`}
+                          className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member 
+                            ${isPopupOpen || isSubcolorActive ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} 
+                            ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`}
                           style={{ backgroundColor: member.hex }}
                           title={`${member.hex} (${memberPercent}%)`}
                         >
+                          {/* Active Indicator Icon for Mobile View */}
+                          {isSubcolorActive && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-full animate-in zoom-in duration-200">
+                              <i className="fa-solid fa-check text-[8px] text-white drop-shadow-md"></i>
+                            </div>
+                          )}
+
                           {/* Drag indicator - desktop only */}
                           {!isTouchDevice && (
                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full">
@@ -466,7 +492,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                             <div className="flex flex-col gap-1">
                               <button
                                 onClick={() => {
-                                  setHoveredColor(member.hex);
+                                  // Trigger the One-Way persistent view logic
+                                  onMobileViewToggle(member.hex, 'color');
                                   setMobilePopup(null);
                                 }}
                                 className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"

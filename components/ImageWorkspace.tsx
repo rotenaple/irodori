@@ -1,7 +1,7 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { formatSize } from '../utils/formatUtils';
 import { rgbToHex } from '../utils/colorUtils';
+import { ColorGroup } from '../types';
 
 interface ImageWorkspaceProps {
   image: string | null;
@@ -14,8 +14,12 @@ interface ImageWorkspaceProps {
   onAddFromMagnifier: (hex: string) => void;
   hoveredColor: string | null;
   hoveredGroupId: string | null;
-  colorGroups: import('../types').ColorGroup[];
+  colorGroups: ColorGroup[];
   isSvg: boolean;
+
+  // NEW: Props for mobile view dismissal
+  mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
+  onClearMobileView: () => void;
 }
 
 const MAGNIFIER_SIZE = 245;
@@ -26,7 +30,9 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   image, processedImage, activeTab, setActiveTab,
   originalSize, processedSize, canvasRef, onAddFromMagnifier,
   hoveredColor, hoveredGroupId, colorGroups,
-  isSvg
+  isSvg,
+  mobileViewTarget,
+  onClearMobileView
 }) => {
   const [magnifierPos, setMagnifierPos] = useState<{
     screenX: number,
@@ -254,31 +260,31 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-hidden group flex items-center justify-center p-0 md:p-4">
+      <div className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-hidden group flex items-center justify-center p-0 md:p-4 bg-dots">
         {!image ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center opacity-10">
             <i className="fa-solid fa-flag text-6xl mb-6"></i>
             <h3 className="tracking-widest text-base uppercase font-bold">Waiting for source</h3>
           </div>
         ) : (
-          <div
-            ref={containerRef}
-            className="w-full h-auto md:h-full relative mb-8 md:mb-0"
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-          >
-            <div className="w-full h-auto md:h-full flex items-center justify-center relative">
+          <div className="w-full h-full flex items-center justify-center relative">
+            <div
+              ref={containerRef}
+              className="relative inline-block max-w-full max-h-full shadow-sm"
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+            >
               <canvas
                 ref={canvasRef}
                 onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
-                className={`w-full h-auto md:h-full object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair drop-shadow-xl`}
+                className={`max-w-full max-h-full block w-auto h-auto object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair`}
               />
               {image && isSvg && activeTab === 'original' && (
                 <img
                   src={image}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Original"
-                  className="w-full h-auto md:h-full object-contain drop-shadow-xl block cursor-crosshair"
+                  className="max-w-full max-h-full block w-auto h-auto object-contain cursor-crosshair"
                 />
               )}
               {processedImage && activeTab === 'processed' && (
@@ -286,7 +292,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                   src={processedImage}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Cleaned"
-                  className="w-full h-auto md:h-full object-contain drop-shadow-xl block cursor-crosshair"
+                  className="max-w-full max-h-full block w-auto h-auto object-contain cursor-crosshair"
                 />
               )}
 
@@ -298,6 +304,17 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                   hoveredGroupId={hoveredGroupId}
                   colorGroups={colorGroups}
                 />
+              )}
+
+              {/* Floating Dismiss Button - Positioned relative to the image edges */}
+              {mobileViewTarget && (
+                <button
+                  onClick={onClearMobileView}
+                  className="md:hidden absolute top-4 right-4 z-[60] bg-white/80 backdrop-blur-sm shadow-xl border border-black/10 text-black px-3 py-1.5 rounded-full font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 hover:bg-black hover:text-white transition-all active:scale-95 animate-in fade-in zoom-in duration-200"
+                >
+                  <i className="fa-solid fa-eye-slash"></i>
+                  <span>Clear</span>
+                </button>
               )}
             </div>
 
@@ -367,7 +384,7 @@ interface HighlightOverlayProps {
   sourceCanvas: HTMLCanvasElement;
   hoveredColor: string | null;
   hoveredGroupId: string | null;
-  colorGroups: import('../types').ColorGroup[];
+  colorGroups: ColorGroup[];
 }
 
 const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hoveredColor, hoveredGroupId, colorGroups }) => {
@@ -394,7 +411,6 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
     const outputImageData = ctx.createImageData(width, height);
     const outputData = outputImageData.data;
 
-    // Determine the set of hex colors to highlight
     const highlightSet = new Set<string>();
     if (hoveredColor) {
       highlightSet.add(hoveredColor.toLowerCase());
@@ -408,11 +424,9 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
 
     let matchCount = 0;
 
-    // Determine overlay color based on average brightness of matching pixels
     let avgBrightness = 0;
     let sampleCount = 0;
 
-    // First pass: calculate average brightness of matching pixels
     for (let i = 0; i < data.length && sampleCount < 100; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -427,13 +441,11 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
 
     avgBrightness = sampleCount > 0 ? avgBrightness / sampleCount : 128;
 
-    // Choose overlay color: violet for bright colors, yellow for dark colors
     const useViolet = avgBrightness > 128;
-    const overlayR = useViolet ? 138 : 255;  // Violet: 138, Yellow: 255
-    const overlayG = useViolet ? 43 : 215;   // Violet: 43,  Yellow: 215
-    const overlayB = useViolet ? 226 : 0;    // Violet: 226, Yellow: 0
+    const overlayR = useViolet ? 138 : 255;
+    const overlayG = useViolet ? 43 : 215;
+    const overlayB = useViolet ? 226 : 0;
 
-    // Second pass: apply the overlay
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -441,15 +453,13 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
       const hex = rgbToHex(r, g, b);
 
       if (highlightSet.has(hex)) {
-        // Keep original color for matching pixels
         outputData[i] = r;
         outputData[i + 1] = g;
         outputData[i + 2] = b;
         outputData[i + 3] = 255;
         matchCount++;
       } else {
-        // Apply colored overlay to non-matching pixels
-        const grey = (r * 0.299 + g * 0.587 + b * 0.114) * 0.4; // Darken to 40%
+        const grey = (r * 0.299 + g * 0.587 + b * 0.114) * 0.4;
         outputData[i] = Math.round(grey * 0.7 + overlayR * 0.3);
         outputData[i + 1] = Math.round(grey * 0.7 + overlayG * 0.3);
         outputData[i + 2] = Math.round(grey * 0.7 + overlayB * 0.3);
@@ -461,7 +471,6 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
     setMatchedPixelCount(matchCount);
   }, [sourceCanvas, hoveredColor, hoveredGroupId, colorGroups]);
 
-  // Show zoom indicator for small pixel groups (less than 0.1% of image)
   const totalPixels = sourceCanvas.width * sourceCanvas.height;
   const showZoomHint = matchedPixelCount > 0 && matchedPixelCount < totalPixels * 0.001;
 
@@ -469,7 +478,7 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
     <>
       <canvas
         ref={overlayCanvasRef}
-        className="absolute inset-0 w-full h-auto md:h-full object-contain pointer-events-none z-10"
+        className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
       />
       {showZoomHint && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#33569a] text-white px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide shadow-lg z-20 flex items-center gap-2 animate-pulse-fast">

@@ -46,12 +46,38 @@ const App: React.FC = () => {
   const [editTarget, setEditTarget] = useState<{ id: string, type: 'original' | 'recolor' } | null>(null);
   const [hoveredColor, setHoveredColor] = useState<string | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+
+  // NEW: State for Mobile View Selection
+  const [mobileViewTarget, setMobileViewTarget] = useState<{ id: string, type: 'group' | 'color' } | null>(null);
+
   const [fullColorList, setFullColorList] = useState<ColorInstance[]>([]);
   const [totalSamples, setTotalSamples] = useState<number>(0);
   const [draggedItem, setDraggedItem] = useState<{ type: 'color' | 'group', colorHex?: string, groupId: string } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sourceImageRef = useRef<HTMLImageElement>(null);
+
+  // NEW: Logic for handling the View Button on mobile
+  const handleMobileView = (id: string, type: 'group' | 'color') => {
+    setMobileViewTarget(prev => {
+      // Constraint: Clicking any other view button overrides old view (Implicit in setting new state)
+
+      // Constraint: Subcolors are one-way switch (only on)
+      if (type === 'color') {
+        return { id, type };
+      }
+
+      // Groups act as a toggle if clicked twice
+      if (type === 'group') {
+        if (prev?.id === id && prev.type === 'group') {
+          return null; // Toggle off
+        }
+        return { id, type };
+      }
+
+      return { id, type };
+    });
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -68,7 +94,6 @@ const App: React.FC = () => {
         };
         textReader.readAsText(file);
 
-        // Disable scaling and post-processing for SVGs automatically
         setDisableScaling(true);
         setDisablePostProcessing(true);
       } else {
@@ -86,6 +111,7 @@ const App: React.FC = () => {
         setManualLayerIds([]);
         setColorOverrides({});
         setActiveTab('original');
+        setMobileViewTarget(null); // Reset mobile view
       };
       reader.readAsDataURL(file);
     }
@@ -120,13 +146,11 @@ const App: React.FC = () => {
             extractionResult = extractColorGroups(imageData);
           }
 
-          // Store the full set of unique colors for recomputation
           const allFoundColors: ColorInstance[] = [];
           extractionResult.groups.forEach((g: ColorGroup) => allFoundColors.push(...g.members));
           setFullColorList(allFoundColors);
           setTotalSamples(extractionResult.totalSamples);
 
-          // Initialize with default grouping
           const initialGroups = extractionResult.groups.slice(0, 10).map((g: ColorGroup) => ({
             ...g,
             representativeHex: g.members[0].hex
@@ -211,7 +235,6 @@ const App: React.FC = () => {
       const updated = prev.map(g => {
         if (g.id === targetGroupId) {
           const members = [...g.members, ...sourceGroup.members];
-          // Sort by count and select the most common color as representative
           const sortedMembers = [...members].sort((a, b) => b.count - a.count);
           newRepresentative = sortedMembers[0].hex;
 
@@ -228,7 +251,6 @@ const App: React.FC = () => {
       return updated;
     });
 
-    // Update selectedInGroup with the new representative
     if (newRepresentative) {
       setSelectedInGroup(prev => ({
         ...prev,
@@ -293,11 +315,9 @@ const App: React.FC = () => {
     return p;
   }, [selectedInGroup, enabledGroups, colorOverrides]);
 
-  // Worker reference
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
-    // Initialize worker
     workerRef.current = new Worker(new URL('./imageProcessor.worker.ts', import.meta.url), { type: 'module' });
 
     workerRef.current.onmessage = (e: MessageEvent<import('./types').WorkerResponse>) => {
@@ -310,7 +330,7 @@ const App: React.FC = () => {
           setActiveTab('processed');
         } else if (error) {
           console.error("Worker error:", error);
-          setProcessingState('idle'); // or error state
+          setProcessingState('idle');
           alert(`Error processing image: ${error}`);
         }
       }
@@ -325,7 +345,6 @@ const App: React.FC = () => {
     if (!image || (!disableRecoloring && palette.length === 0) || !sourceImageRef.current || !workerRef.current) return;
     setProcessingState('processing');
 
-    // Give UI a moment to update state
     await new Promise(resolve => setTimeout(resolve, 50));
 
     if (isSvg && svgContent) {
@@ -345,8 +364,6 @@ const App: React.FC = () => {
 
     const img = sourceImageRef.current;
 
-    // Create ImageBitmap to transfer to worker
-    // Note: This is faster than structured cloning ImageData but requires everything to be async
     try {
       const imageBitmap = await createImageBitmap(img);
 
@@ -367,7 +384,7 @@ const App: React.FC = () => {
           smoothingLevels,
           vertexInertia
         }
-      }, [imageBitmap]); // Transfer the bitmap
+      }, [imageBitmap]);
     } catch (err) {
       console.error("Failed to start worker:", err);
       setProcessingState('idle');
@@ -394,8 +411,6 @@ const App: React.FC = () => {
     if (processedImage) {
       const link = document.createElement('a');
       link.href = processedImage;
-
-      // Extract basename and append suffix
       const dotIndex = originalFileName.lastIndexOf('.');
       const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
 
@@ -409,14 +424,22 @@ const App: React.FC = () => {
     }
   };
 
+  // Determine what is currently being hovered/viewed by combining Desktop Hover + Mobile View Selection
+  // Mobile selection takes priority
+  const effectiveHoveredGroupId = mobileViewTarget?.type === 'group'
+    ? mobileViewTarget.id
+    : hoveredGroupId;
+
+  const effectiveHoveredColor = mobileViewTarget?.type === 'color'
+    ? mobileViewTarget.id
+    : hoveredColor;
+
   return (
     <div className="h-full flex flex-col bg-white overflow-hidden">
       <Header />
 
-      {/* Main Container - Constrained Width but Full Height available */}
       <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
 
-        {/* Left Column: Control Panel */}
         <aside className="w-full md:w-96 lg:w-[420px] px-0 md:pl-10 flex-none md:h-full border-r border-[#333]/5 bg-white flex flex-col relative z-10">
           <div className="px-4 md:px-6 py-4 overflow-y-auto md:overflow-y-auto custom-scrollbar flex-1 min-h-[400px] md:min-h-0">
             <h2 className="text-[11px] font-bold uppercase tracking-widest mb-2 text-[#333]/40 border-b border-[#333]/5 pb-1">Configurations</h2>
@@ -450,10 +473,13 @@ const App: React.FC = () => {
               disableRecoloring={disableRecoloring}
               setDisableRecoloring={setDisableRecoloring}
               isSvg={isSvg}
+              // Pass the Mobile View Logic to ControlPanel
+              // Note: You must update ControlPanel to use 'onMobileViewToggle' for its "View" buttons
+              mobileViewTarget={mobileViewTarget}
+              onMobileViewToggle={handleMobileView}
             />
           </div>
 
-          {/* Action Footer */}
           <div className="px-4 md:px-6 py-4 z-20">
             <div className="flex flex-row gap-2">
               <button
@@ -480,19 +506,25 @@ const App: React.FC = () => {
           </div>
         </aside>
 
-        {/* Right Column: Workspace */}
         <section className="flex-1 md:h-full pt-1 pb-10 px-4 md:pt-2 md:pb-2 md:pr-16 md:pl-6 flex flex-col bg-[#FAFAFA] min-w-0 border-l border-[#333]/5 min-h-[200px] md:min-h-0">
           <div className="flex-1 min-h-0">
+            {/* The Floating Dismiss Button has been REMOVED from here */}
             <ImageWorkspace
-              image={image} processedImage={processedImage}
-              activeTab={activeTab} setActiveTab={setActiveTab}
-              originalSize={originalSize} processedSize={processedSize}
+              image={image}
+              processedImage={processedImage}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              originalSize={originalSize}
+              processedSize={processedSize}
               canvasRef={canvasRef}
               onAddFromMagnifier={addManualLayer}
-              hoveredColor={hoveredColor}
-              hoveredGroupId={hoveredGroupId}
+              hoveredColor={effectiveHoveredColor}
+              hoveredGroupId={effectiveHoveredGroupId}
               colorGroups={colorGroups}
               isSvg={isSvg}
+              // Pass the state and setter for the mobile view down to the workspace
+              mobileViewTarget={mobileViewTarget}
+              onClearMobileView={() => setMobileViewTarget(null)}
             />
           </div>
         </section>
