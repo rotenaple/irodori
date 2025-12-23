@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { formatSize } from '../utils/formatUtils';
 import { rgbToHex } from '../utils/colorUtils';
 import { ColorGroup } from '../types';
@@ -16,8 +16,6 @@ interface ImageWorkspaceProps {
   hoveredGroupId: string | null;
   colorGroups: ColorGroup[];
   isSvg: boolean;
-
-  // NEW: Props for mobile view dismissal
   mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
   onClearMobileView: () => void;
 }
@@ -46,11 +44,21 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   } | null>(null);
 
   const processedCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Ref for the outer flexible container (the gray area)
+  const parentRef = useRef<HTMLDivElement>(null);
+  // Ref for the tight wrapper around the image
   const containerRef = useRef<HTMLDivElement>(null);
+
   const targetPosRef = useRef<{ x: number, y: number } | null>(null);
   const currentPosRef = useRef<{ x: number, y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  // Layout state to perfectly fit the image wrapper
+  const [layoutDims, setLayoutDims] = useState<{ width: number, height: number } | null>(null);
+  const [activeImageDims, setActiveImageDims] = useState<{ width: number, height: number } | null>(null);
+
+  // 1. Load Processed Image to Canvas
   useEffect(() => {
     if (processedImage && processedCanvasRef.current) {
       const img = new Image();
@@ -61,12 +69,82 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
           canvas.width = img.width;
           canvas.height = img.height;
           canvas.getContext('2d')?.drawImage(img, 0, 0);
+
+          if (activeTab === 'processed') {
+            setActiveImageDims({ width: img.width, height: img.height });
+          }
         }
       };
     }
-  }, [processedImage]);
+  }, [processedImage, activeTab]);
 
-  // Cleanup animation frame on unmount
+  // 2. Track Original Image Dims (FIXED: Load image object directly)
+  useEffect(() => {
+    if (activeTab === 'original' && image) {
+      const img = new Image();
+      img.src = image;
+      img.onload = () => {
+        // Get dimensions directly from the source string
+        // This ensures we have dimensions even if the canvas hasn't painted yet
+        let w = img.width;
+        let h = img.height;
+
+        // Fallback for weird SVG loading states
+        if (w === 0 || h === 0) {
+          w = img.naturalWidth || 800;
+          h = img.naturalHeight || 600;
+        }
+
+        setActiveImageDims({ width: w, height: h });
+      };
+    }
+  }, [image, activeTab]);
+
+  // 3. Calculation Layout Logic
+  useLayoutEffect(() => {
+    if (!parentRef.current || !activeImageDims) return;
+
+    const calculateLayout = () => {
+      if (!parentRef.current || !activeImageDims) return;
+
+      const pW = parentRef.current.clientWidth;
+      const pH = parentRef.current.clientHeight;
+
+      // Effective available space
+      const availW = pW - (window.innerWidth >= 768 ? 32 : 0);
+      const availH = pH - (window.innerWidth >= 768 ? 32 : 0);
+
+      const { width: imgW, height: imgH } = activeImageDims;
+      if (!imgW || !imgH) return;
+
+      const imgAspect = imgW / imgH;
+      const parentAspect = availW / availH;
+
+      let renderW, renderH;
+
+      if (imgAspect > parentAspect) {
+        // Image is wider than container (relative to aspect) -> Constrain by Width
+        renderW = availW;
+        renderH = availW / imgAspect;
+      } else {
+        // Image is taller -> Constrain by Height
+        renderH = availH;
+        renderW = availH * imgAspect;
+      }
+
+      setLayoutDims({ width: renderW, height: renderH });
+    };
+
+    calculateLayout();
+
+    const observer = new ResizeObserver(calculateLayout);
+    observer.observe(parentRef.current);
+
+    return () => observer.disconnect();
+  }, [activeImageDims]);
+
+
+  // Cleanup animation frame
   useEffect(() => {
     return () => {
       if (rafRef.current) {
@@ -130,7 +208,6 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
     const target = targetPosRef.current;
     const current = currentPosRef.current;
 
-    // Linear interpolation (lerp) for smooth movement
     const lerpFactor = 0.15;
     const dx = target.x - current.x;
     const dy = target.y - current.y;
@@ -154,9 +231,8 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
         sourceCanvas
       });
 
-      // Preserve locked state if we are just animating movement
       setMagnifierPos(prev => {
-        if (prev?.locked) return prev; // Don't update if locked
+        if (prev?.locked) return prev;
         return newState;
       });
     }
@@ -170,9 +246,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (magnifierPos?.locked) return;
-
     targetPosRef.current = { x: e.clientX, y: e.clientY };
-
     if (!rafRef.current) {
       rafRef.current = requestAnimationFrame(animate);
     }
@@ -203,7 +277,6 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
   const getMagnifierBackgroundPosition = () => {
     if (!magnifierPos) return '0 0';
-    // Perfectly center the current pixel (px, py) in the magnifier window
     const centerXInZoom = (magnifierPos.px + 0.5) * VISUAL_PIXEL_SIZE;
     const centerYInZoom = (magnifierPos.py + 0.5) * VISUAL_PIXEL_SIZE;
     const offsetX = (MAGNIFIER_SIZE / 2) - centerXInZoom;
@@ -260,31 +333,38 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-hidden group flex items-center justify-center p-0 md:p-4 bg-dots">
+      <div
+        ref={parentRef}
+        className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-hidden group flex items-center justify-center p-0 md:p-4 bg-dots"
+      >
         {!image ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center opacity-10">
             <i className="fa-solid fa-flag text-6xl mb-6"></i>
             <h3 className="tracking-widest text-base uppercase font-bold">Waiting for source</h3>
           </div>
         ) : (
-          <div className="w-full h-full flex items-center justify-center relative">
+          <div className="w-full h-full flex items-center justify-center">
             <div
               ref={containerRef}
-              className="relative inline-block max-w-full max-h-full shadow-sm"
+              className="relative shadow-sm transition-all duration-75 ease-linear"
+              style={{
+                width: layoutDims?.width,
+                height: layoutDims?.height
+              }}
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
             >
               <canvas
                 ref={canvasRef}
                 onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
-                className={`max-w-full max-h-full block w-auto h-auto object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair`}
+                className={`w-full h-full object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair`}
               />
               {image && isSvg && activeTab === 'original' && (
                 <img
                   src={image}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Original"
-                  className="max-w-full max-h-full block w-auto h-auto object-contain cursor-crosshair"
+                  className="w-full h-full object-contain cursor-crosshair"
                 />
               )}
               {processedImage && activeTab === 'processed' && (
@@ -292,7 +372,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                   src={processedImage}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Cleaned"
-                  className="max-w-full max-h-full block w-auto h-auto object-contain cursor-crosshair"
+                  className="w-full h-full object-contain cursor-crosshair"
                 />
               )}
 
