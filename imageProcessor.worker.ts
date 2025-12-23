@@ -81,36 +81,58 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const nativePixelData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight).data;
         let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
 
-        // Pre-create a flat mapping from all member colors to their group index
-        // This is more efficient for the initial pass
+        // 1. Setup Maps for Fast Lookup
+        // We use a map to link specific hex codes directly to a palette index.
+        // This ensures the user's manual groupings override mathematical distance.
         const colorToGroupIdx = new Map<string, number>();
-        parameters.palette.forEach((p, pIdx) => {
-            // Find the group this palette entry belongs to
-            const group = parameters.colorGroups?.find(g => g.id === p.id);
-            if (group) {
-                group.members.forEach(m => {
-                    colorToGroupIdx.set(m.hex.toLowerCase(), pIdx);
-                });
-            } else {
-                // For manual layers or groups without explicit members in the message, just use its own hex
-                colorToGroupIdx.set(p.hex.toLowerCase(), pIdx);
+        const paletteIdMap = new Map<string, number>();
+
+        // Create quick lookup: Palette ID -> Index in matchPalette array
+        matchPalette.forEach((p, idx) => paletteIdMap.set(p.id, idx));
+
+        // 2. Populate Group Mappings (Priority: Explicit Group Members)
+        // Accessing parameters.colorGroups ensures we see all members currently assigned in the UI
+        if (parameters.colorGroups) {
+            parameters.colorGroups.forEach(group => {
+                const pIdx = paletteIdMap.get(group.id);
+                // Only if the group is actually part of the active palette (enabled)
+                if (pIdx !== undefined) {
+                    group.members.forEach(m => {
+                        colorToGroupIdx.set(m.hex.toLowerCase(), pIdx);
+                    });
+                }
+            });
+        }
+
+        // 3. Ensure Palette Heads are mapped (Secondary)
+        // This handles manual layers or colors that might not be in the 'members' list (e.g. initial seeds)
+        matchPalette.forEach((p, idx) => {
+            const hex = p.hex.toLowerCase();
+            if (!colorToGroupIdx.has(hex)) {
+                colorToGroupIdx.set(hex, idx);
             }
         });
 
+        // 4. Pixel Loop
         for (let i = 0; i < nativePixelData.length; i += 4) {
             const r = nativePixelData[i];
             const g = nativePixelData[i + 1];
             const b = nativePixelData[i + 2];
-            const hex = rgbToHex(r, g, b);
+            const hex = rgbToHex(r, g, b); // Ensure this util returns compatible hex (e.g. lowercase)
 
+            // Step A: Check if this specific color is explicitly grouped
             let pIdx = colorToGroupIdx.get(hex);
+
+            // Step B: If not in a group, fall back to Nearest Neighbor logic
             if (pIdx === undefined) {
                 const pixel = { r, g, b };
                 const closest = findClosestColor(pixel, matchPalette);
-                pIdx = matchPalette.findIndex(p => p.id === closest.id);
+                // We find the index of the closest match
+                const foundIdx = paletteIdMap.get(closest.id);
+                pIdx = foundIdx !== undefined ? foundIdx : 0;
             }
 
-            lowResIdxMap[i / 4] = pIdx !== -1 ? pIdx : 0;
+            lowResIdxMap[i / 4] = pIdx;
         }
 
         // Determine effective parameters
