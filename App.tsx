@@ -151,15 +151,24 @@ const App: React.FC = () => {
           setFullColorList(allFoundColors);
           setTotalSamples(extractionResult.totalSamples);
 
-          const initialGroups = extractionResult.groups.slice(0, 10).map((g: ColorGroup) => ({
-            ...g,
-            representativeHex: g.members[0].hex
-          }));
-          setColorGroups(initialGroups);
+          // === THRESHOLD FILTERING APPLIED HERE ===
+          // Filter out groups that are less than 0.25% of the image
+          const THRESHOLD_PERCENT = 0.0025;
+          const pixelThreshold = extractionResult.totalSamples * THRESHOLD_PERCENT;
+
+          const significantGroups = extractionResult.groups
+            .filter((g: ColorGroup) => g.totalCount >= pixelThreshold)
+            .slice(0, 10)
+            .map((g: ColorGroup) => ({
+              ...g,
+              representativeHex: g.members[0].hex
+            }));
+
+          setColorGroups(significantGroups);
 
           const initialSelections: Record<string, string> = {};
           const initialEnabled = new Set<string>();
-          initialGroups.slice(0, 6).forEach((g: ColorGroup) => {
+          significantGroups.slice(0, 6).forEach((g: ColorGroup) => {
             initialSelections[g.id] = g.representativeHex!;
             initialEnabled.add(g.id);
           });

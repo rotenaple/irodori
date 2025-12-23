@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ColorGroup } from '../types';
 
 // InfoBox component for tooltips
@@ -56,7 +56,7 @@ interface ControlPanelProps {
   setDisableRecoloring: (v: boolean) => void;
   isSvg: boolean;
 
-  // NEW: Mobile View Logic Props
+  // Mobile View Logic Props
   mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
   onMobileViewToggle: (id: string, type: 'group' | 'color') => void;
 }
@@ -83,10 +83,48 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
 
+  const [expandedSubcolors, setExpandedSubcolors] = useState<Set<string>>(new Set());
+  const [subcolorLimit, setSubcolorLimit] = useState(16);
+  const panelRef = useRef<HTMLDivElement>(null);
+
   const toggleInfo = (key: string) => setActiveInfo(activeInfo === key ? null : key);
+
+  const toggleSubcolorExpansion = (groupId: string) => {
+    setExpandedSubcolors(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
 
   // Detect if touch device
   const isTouchDevice = typeof window !== 'undefined' && 'ontouchstart' in window;
+
+  // Calculate dynamic subcolor limit based on panel width
+  useEffect(() => {
+    if (!panelRef.current) return;
+
+    const calculateLimit = () => {
+      if (!panelRef.current) return;
+      // Calculate available width for subcolors:
+      // Panel Width - (Subcolor Container Padding [px-5=40px] + Group Item Padding [p-1=8px] + Borders/Margins ~4px)
+      const availableWidth = panelRef.current.clientWidth - 52;
+
+      // Each item is w-5 (20px) + gap-1 (4px) = 24px wide
+      const itemsPerRow = Math.floor(availableWidth / 24);
+
+      // Show approx 2 rows by default, but keep a reasonable minimum
+      setSubcolorLimit(Math.max(12, itemsPerRow * 2));
+    };
+
+    calculateLimit();
+
+    const observer = new ResizeObserver(calculateLimit);
+    observer.observe(panelRef.current);
+
+    return () => observer.disconnect();
+  }, []);
 
   // Close all dropdowns and mobile popup when clicking outside
   useEffect(() => {
@@ -108,7 +146,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   }, [mobilePopup]);
 
   return (
-    <div className="flex flex-col gap-2 pb-0">
+    <div ref={panelRef} className="flex flex-col gap-2 pb-0">
       {/* Upload Section */}
       <div className="border-b border-[#333]/10 pb-3">
         <label className={`flex flex-col items-center justify-center w-full h-14 border-2 border-dashed rounded-xl cursor-pointer transition-all group relative overflow-hidden ${image ? 'border-[#333]/10 bg-white hover:border-[#333]/30' : 'border-[#33569a]/30 bg-[#33569a]/5 hover:bg-[#33569a]/10 hover:border-[#33569a]/50'}`}>
@@ -311,6 +349,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           // Check for active mobile view states
           const isGroupViewActive = mobileViewTarget?.id === id && mobileViewTarget?.type === 'group';
 
+          // PREPARE VISIBLE SUBCOLORS
+          const isSubcolorsExpanded = expandedSubcolors.has(id);
+          const sortedMembers = [...members].sort((a, b) => b.count - a.count);
+          // Use dynamic limit
+          const visibleMembers = isSubcolorsExpanded ? sortedMembers : sortedMembers.slice(0, subcolorLimit);
+          const hiddenCount = sortedMembers.length - subcolorLimit;
+
           return (
             <div
               key={id}
@@ -378,7 +423,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   </button>
                 </div>
 
-                {/* View in Image button - Handles both Desktop Hover and Mobile Toggle */}
+                {/* View in Image button */}
                 <button
                   onClick={(e) => {
                     if (isTouchDevice) {
@@ -431,111 +476,133 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               </div>
 
               {members.length > 1 && (
-                <div className="flex flex-wrap gap-1 px-5 pb-1 relative">
-                  {members.sort((a, b) => b.count - a.count).map(member => {
-                    const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
-                    const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
-                    // Check if this subcolor is the active persistent view target
-                    const isSubcolorActive = mobileViewTarget?.id === member.hex && mobileViewTarget?.type === 'color';
+                <div className="flex flex-col gap-2 px-5 pb-1 relative">
+                  <div className="flex flex-wrap gap-1">
+                    {visibleMembers.map(member => {
+                      const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
+                      const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
+                      const isSubcolorActive = mobileViewTarget?.id === member.hex && mobileViewTarget?.type === 'color';
 
-                    return (
-                      <div key={member.hex} className="relative">
-                        <button
-                          draggable={!isTouchDevice}
-                          onDragStart={(e) => {
-                            setDraggedItem({ type: 'color', colorHex: member.hex, groupId: id });
-                            e.dataTransfer.effectAllowed = 'move';
-                            e.stopPropagation();
-                          }}
-                          onDragEnd={() => setDraggedItem(null)}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isTouchDevice) {
-                              // Mobile: show popup for options
-                              setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent });
-                            } else {
-                              // Desktop: ungroup directly
-                              onMoveColor(member.hex, id, 'new');
-                            }
-                          }}
-                          onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)}
-                          onMouseLeave={() => !isTouchDevice && setHoveredColor(null)}
-                          className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member 
-                            ${isPopupOpen || isSubcolorActive ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} 
-                            ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`}
-                          style={{ backgroundColor: member.hex }}
-                          title={`${member.hex} (${memberPercent}%)`}
-                        >
-                          {/* Active Indicator Icon for Mobile View */}
-                          {isSubcolorActive && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-full animate-in zoom-in duration-200">
-                              <i className="fa-solid fa-check text-[8px] text-white drop-shadow-md"></i>
-                            </div>
-                          )}
+                      return (
+                        <div key={member.hex} className="relative">
+                          <button
+                            draggable={!isTouchDevice}
+                            onDragStart={(e) => {
+                              setDraggedItem({ type: 'color', colorHex: member.hex, groupId: id });
+                              e.dataTransfer.effectAllowed = 'move';
+                              e.stopPropagation();
+                            }}
+                            onDragEnd={() => setDraggedItem(null)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isTouchDevice) {
+                                // Mobile: show popup
+                                setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent });
+                              } else {
+                                // Desktop: ungroup directly
+                                onMoveColor(member.hex, id, 'new');
+                              }
+                            }}
+                            onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)}
+                            onMouseLeave={() => !isTouchDevice && setHoveredColor(null)}
+                            className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member ${isPopupOpen || isSubcolorActive ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`}
+                            style={{ backgroundColor: member.hex }}
+                            title={`${member.hex} (${memberPercent}%)`}
+                          >
+                            {/* Active Indicator Icon for Mobile View */}
+                            {isSubcolorActive && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-full animate-in zoom-in duration-200">
+                                <i className="fa-solid fa-check text-[8px] text-white drop-shadow-md"></i>
+                              </div>
+                            )}
 
-                          {/* Drag indicator - desktop only */}
-                          {!isTouchDevice && (
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full">
-                              <i className="fa-solid fa-grip-vertical text-[6px] text-white drop-shadow-md"></i>
-                            </div>
-                          )}
-                        </button>
+                            {/* Drag indicator - desktop only */}
+                            {!isTouchDevice && (
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full">
+                                <i className="fa-solid fa-grip-vertical text-[6px] text-white drop-shadow-md"></i>
+                              </div>
+                            )}
+                          </button>
 
-                        {/* Mobile Popup */}
-                        {isPopupOpen && (
-                          <div className="mobile-color-popup absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 min-w-[120px]">
-                            <div className="text-center mb-2">
-                              <div className="w-8 h-8 rounded-full mx-auto border-2 border-black/10 shadow-inner" style={{ backgroundColor: member.hex }}></div>
-                              <div className="text-[9px] font-mono font-bold text-[#333] mt-1">{member.hex.toUpperCase()}</div>
-                              <div className="text-[8px] text-slate-400">{memberPercent}%</div>
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <button
-                                onClick={() => {
-                                  // Trigger the One-Way persistent view logic
-                                  onMobileViewToggle(member.hex, 'color');
-                                  setMobilePopup(null);
-                                }}
-                                className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"
-                              >
-                                <i className="fa-solid fa-eye text-[#33569a]"></i>
-                                <span>View in Image</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  onMoveColor(member.hex, id, 'new');
-                                  setMobilePopup(null);
-                                }}
-                                className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"
-                              >
-                                <i className="fa-solid fa-arrow-up-right-from-square text-[#33569a]"></i>
-                                <span>Ungroup Color</span>
-                              </button>
-                              <div className="border-t border-slate-100 pt-1 mt-1">
-                                <div className="text-[7px] uppercase text-slate-400 font-bold mb-1 px-2">Move to group</div>
-                                {colorGroups.filter(g => g.id !== id).slice(0, 4).map(target => (
-                                  <button
-                                    key={target.id}
-                                    onClick={() => {
-                                      onMoveColor(member.hex, id, target.id);
-                                      setMobilePopup(null);
-                                    }}
-                                    className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded text-left w-full"
-                                  >
-                                    <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0]?.hex }} />
-                                    <span className="text-[8px] text-slate-600 truncate">Group {target.id.split('-')[1]}</span>
-                                  </button>
-                                ))}
+                          {/* Mobile Popup */}
+                          {isPopupOpen && (
+                            <div className="mobile-color-popup absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 min-w-[120px]">
+                              <div className="text-center mb-2">
+                                <div className="w-8 h-8 rounded-full mx-auto border-2 border-black/10 shadow-inner" style={{ backgroundColor: member.hex }}></div>
+                                <div className="text-[9px] font-mono font-bold text-[#333] mt-1">{member.hex.toUpperCase()}</div>
+                                <div className="text-[8px] text-slate-400">{memberPercent}%</div>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <button
+                                  onClick={() => {
+                                    onMobileViewToggle(member.hex, 'color');
+                                    setMobilePopup(null);
+                                  }}
+                                  className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"
+                                >
+                                  <i className="fa-solid fa-eye text-[#33569a]"></i>
+                                  <span>View in Image</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    onMoveColor(member.hex, id, 'new');
+                                    setMobilePopup(null);
+                                  }}
+                                  className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"
+                                >
+                                  <i className="fa-solid fa-arrow-up-right-from-square text-[#33569a]"></i>
+                                  <span>Ungroup Color</span>
+                                </button>
+                                <div className="border-t border-slate-100 pt-1 mt-1">
+                                  <div className="text-[7px] uppercase text-slate-400 font-bold mb-1 px-2">Move to group</div>
+                                  {colorGroups.filter(g => g.id !== id).slice(0, 4).map(target => (
+                                    <button
+                                      key={target.id}
+                                      onClick={() => {
+                                        onMoveColor(member.hex, id, target.id);
+                                        setMobilePopup(null);
+                                      }}
+                                      className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded text-left w-full"
+                                    >
+                                      <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0]?.hex }} />
+                                      <span className="text-[8px] text-slate-600 truncate">Group {target.id.split('-')[1]}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full">
+                                <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-white"></div>
                               </div>
                             </div>
-                            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full">
-                              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-white"></div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Show More / Less Toggle */}
+                  {hiddenCount > 0 && !isSubcolorsExpanded && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSubcolorExpansion(id);
+                      }}
+                      className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"
+                    >
+                      <i className="fa-solid fa-angle-down"></i> Show {hiddenCount} More
+                    </button>
+                  )}
+                  {isSubcolorsExpanded && sortedMembers.length > subcolorLimit && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSubcolorExpansion(id);
+                      }}
+                      className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"
+                    >
+                      <i className="fa-solid fa-angle-up"></i> Show Less
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { formatSize } from '../utils/formatUtils';
-import { rgbToHex } from '../utils/colorUtils';
+import { rgbToHex, hexToRgb } from '../utils/colorUtils';
 import { ColorGroup } from '../types';
 
 interface ImageWorkspaceProps {
@@ -45,20 +45,23 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
   const processedCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Ref for the outer flexible container (the gray area)
+  // Ref for the outer flexible container
   const parentRef = useRef<HTMLDivElement>(null);
   // Ref for the tight wrapper around the image
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // CACHE: Store the raw pixel data
+  const cachedSourceDataRef = useRef<Uint32Array | null>(null);
+  const cachedDimensionsRef = useRef<{ w: number, h: number } | null>(null);
 
   const targetPosRef = useRef<{ x: number, y: number } | null>(null);
   const currentPosRef = useRef<{ x: number, y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Layout state to perfectly fit the image wrapper
   const [layoutDims, setLayoutDims] = useState<{ width: number, height: number } | null>(null);
   const [activeImageDims, setActiveImageDims] = useState<{ width: number, height: number } | null>(null);
 
-  // 1. Load Processed Image to Canvas
+  // 1. Load Processed Image
   useEffect(() => {
     if (processedImage && processedCanvasRef.current) {
       const img = new Image();
@@ -78,29 +81,42 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
     }
   }, [processedImage, activeTab]);
 
-  // 2. Track Original Image Dims (FIXED: Load image object directly)
+  // 2. Track Original Image Dims & Cache Data
   useEffect(() => {
     if (activeTab === 'original' && image) {
       const img = new Image();
       img.src = image;
       img.onload = () => {
-        // Get dimensions directly from the source string
-        // This ensures we have dimensions even if the canvas hasn't painted yet
         let w = img.width;
         let h = img.height;
 
-        // Fallback for weird SVG loading states
         if (w === 0 || h === 0) {
           w = img.naturalWidth || 800;
           h = img.naturalHeight || 600;
         }
 
         setActiveImageDims({ width: w, height: h });
-      };
-    }
-  }, [image, activeTab]);
 
-  // 3. Calculation Layout Logic
+        if (!isSvg) {
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = w;
+          offCanvas.height = h;
+          const ctx = offCanvas.getContext('2d', { willReadFrequently: true });
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, w, h);
+            // Store as Uint32 for fast copying
+            cachedSourceDataRef.current = new Uint32Array(imageData.data.buffer);
+            cachedDimensionsRef.current = { w, h };
+          }
+        }
+      };
+    } else {
+      cachedSourceDataRef.current = null;
+    }
+  }, [image, activeTab, isSvg]);
+
+  // 3. Layout Logic
   useLayoutEffect(() => {
     if (!parentRef.current || !activeImageDims) return;
 
@@ -109,8 +125,6 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
       const pW = parentRef.current.clientWidth;
       const pH = parentRef.current.clientHeight;
-
-      // Effective available space
       const availW = pW - (window.innerWidth >= 768 ? 32 : 0);
       const availH = pH - (window.innerWidth >= 768 ? 32 : 0);
 
@@ -123,11 +137,9 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
       let renderW, renderH;
 
       if (imgAspect > parentAspect) {
-        // Image is wider than container (relative to aspect) -> Constrain by Width
         renderW = availW;
         renderH = availW / imgAspect;
       } else {
-        // Image is taller -> Constrain by Height
         renderH = availH;
         renderW = availH * imgAspect;
       }
@@ -298,6 +310,8 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
     return { top, left };
   })();
 
+  const isHighlighActive = (hoveredColor || hoveredGroupId || mobileViewTarget) && activeTab === 'original' && !isSvg;
+
   return (
     <div className="flex flex-col gap-2 md:gap-1.5 w-full h-auto md:h-full min-h-0">
       <div className="flex items-center justify-between px-1 pt-1 pb-2 md:pb-1.5 border-b border-[#333]/5">
@@ -354,17 +368,20 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
             >
+              {/* Layer 1: Base Canvas (Visible) */}
               <canvas
                 ref={canvasRef}
                 onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
-                className={`w-full h-full object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair`}
+                className={`w-full h-full object-contain ${activeTab === 'original' && !isSvg ? 'block' : 'hidden'} cursor-crosshair relative z-0`}
               />
+
+              {/* Images for fallback/processed tabs */}
               {image && isSvg && activeTab === 'original' && (
                 <img
                   src={image}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Original"
-                  className="w-full h-full object-contain cursor-crosshair"
+                  className="w-full h-full object-contain cursor-crosshair relative z-0"
                 />
               )}
               {processedImage && activeTab === 'processed' && (
@@ -372,21 +389,24 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                   src={processedImage}
                   onClick={() => magnifierPos && setMagnifierPos(p => p ? { ...p, locked: !p.locked } : null)}
                   alt="Cleaned"
-                  className="w-full h-full object-contain cursor-crosshair"
+                  className="w-full h-full object-contain cursor-crosshair relative z-0"
                 />
               )}
 
-              {/* Highlight Palette Overlay */}
-              {(hoveredColor || hoveredGroupId) && activeTab === 'original' && canvasRef.current && (
+              {/* Layer 2: Highlight Overlay (Handles dynamic color contrast) */}
+              {isHighlighActive && cachedSourceDataRef.current && (
                 <HighlightOverlay
-                  sourceCanvas={canvasRef.current}
+                  sourceData={cachedSourceDataRef.current}
+                  width={cachedDimensionsRef.current?.w || 0}
+                  height={cachedDimensionsRef.current?.h || 0}
                   hoveredColor={hoveredColor}
                   hoveredGroupId={hoveredGroupId}
                   colorGroups={colorGroups}
+                  mobileViewTarget={mobileViewTarget}
                 />
               )}
 
-              {/* Floating Dismiss Button - Positioned relative to the image edges */}
+              {/* Floating Dismiss Button */}
               {mobileViewTarget && (
                 <button
                   onClick={onClearMobileView}
@@ -459,111 +479,193 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   );
 };
 
-// --- Highlight Overlay Component ---
+// --- OPTIMIZED OVERLAY COMPONENT ---
 interface HighlightOverlayProps {
-  sourceCanvas: HTMLCanvasElement;
+  sourceData: Uint32Array;
+  width: number;
+  height: number;
   hoveredColor: string | null;
   hoveredGroupId: string | null;
   colorGroups: ColorGroup[];
+  mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
 }
 
-const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hoveredColor, hoveredGroupId, colorGroups }) => {
-  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [matchedPixelCount, setMatchedPixelCount] = useState(0);
+const HighlightOverlay: React.FC<HighlightOverlayProps> = ({
+  sourceData, width, height, hoveredColor, hoveredGroupId, colorGroups, mobileViewTarget
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [matchedCount, setMatchedCount] = useState(0);
+
+  // Helper buffer to convert RGBA components to the system's native 32-bit integer format
+  const intBuffer = useRef(new ArrayBuffer(4));
+  const intView8 = useRef(new Uint8ClampedArray(intBuffer.current));
+  const intView32 = useRef(new Uint32Array(intBuffer.current));
 
   useEffect(() => {
-    const canvas = overlayCanvasRef.current;
-    if (!canvas || !sourceCanvas) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !sourceData) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = sourceCanvas.width;
-    const height = sourceCanvas.height;
-    canvas.width = width;
-    canvas.height = height;
-
-    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
-    if (!sourceCtx) return;
-
-    const imageData = sourceCtx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    const outputImageData = ctx.createImageData(width, height);
-    const outputData = outputImageData.data;
-
-    const highlightSet = new Set<string>();
-    if (hoveredColor) {
-      highlightSet.add(hoveredColor.toLowerCase());
-    } else if (hoveredGroupId) {
-      const group = colorGroups.find(g => g.id === hoveredGroupId);
-      group?.members.forEach(m => highlightSet.add(m.hex.toLowerCase()));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
     }
 
+    const targetSet = new Set<number>();
 
-    if (highlightSet.size === 0) return;
+    // Stats for dynamic color calculation
+    let totalR = 0;
+    let totalG = 0;
+    let totalB = 0;
+    let count = 0;
+
+    const activeColor = mobileViewTarget?.type === 'color' ? mobileViewTarget.id : hoveredColor;
+    const activeGroup = mobileViewTarget?.type === 'group' ? mobileViewTarget.id : hoveredGroupId;
+
+    const addTargetColor = (hex: string) => {
+      const rgb = hexToRgb(hex);
+      if (rgb) {
+        // Accumulate for avg calculation
+        totalR += rgb.r;
+        totalG += rgb.g;
+        totalB += rgb.b;
+        count++;
+
+        // Write bytes to buffer to get correct Int32
+        intView8.current[0] = rgb.r;
+        intView8.current[1] = rgb.g;
+        intView8.current[2] = rgb.b;
+        intView8.current[3] = 255;
+        targetSet.add(intView32.current[0]);
+      }
+    };
+
+    if (activeColor) {
+      addTargetColor(activeColor);
+    } else if (activeGroup) {
+      const group = colorGroups.find(g => g.id === activeGroup);
+      group?.members.forEach(m => addTargetColor(m.hex));
+    }
+
+    if (targetSet.size === 0) {
+      ctx.clearRect(0, 0, width, height);
+      return;
+    }
+
+    // --- Dynamic Mask Color Calculation ---
+    // Calculates complementary color with adjusted saturation/lightness
+    const avgR = totalR / count;
+    const avgG = totalG / count;
+    const avgB = totalB / count;
+
+    // Convert RGB to HSL
+    const rNorm = avgR / 255, gNorm = avgG / 255, bNorm = avgB / 255;
+    const max = Math.max(rNorm, gNorm, bNorm), min = Math.min(rNorm, gNorm, bNorm);
+    let h = 0, s = 0, l = (max + min) / 2;
+
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case rNorm: h = (gNorm - bNorm) / d + (gNorm < bNorm ? 6 : 0); break;
+        case gNorm: h = (bNorm - rNorm) / d + 2; break;
+        case bNorm: h = (rNorm - gNorm) / d + 4; break;
+      }
+      h /= 6;
+    }
+
+    let overlayH, overlayS, overlayL;
+
+    // Special handling for Greys (Low saturation targets)
+    if (s < 0.15) {
+      // If target is Light Grey/White -> Mask is Dark Slate
+      // If target is Dark Grey/Black -> Mask is Cream/Off-White
+      if (l > 0.5) {
+        overlayH = 220 / 360;
+        overlayS = 0.20;
+        overlayL = 0.20;
+      } else {
+        overlayH = 45 / 360;
+        overlayS = 0.20;
+        overlayL = 0.85;
+      }
+    } else {
+      // Color Target -> Complementary Hue
+      overlayH = (h + 0.5) % 1;
+      overlayS = 0.25; // Tone down saturation
+      overlayL = l > 0.5 ? 0.2 : 0.85; // Invert lightness for contrast
+    }
+
+    // Convert back to RGB for display
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+
+    const q = overlayL < 0.5 ? overlayL * (1 + overlayS) : overlayL + overlayS - overlayL * overlayS;
+    const p = 2 * overlayL - q;
+    const rOut = hue2rgb(p, q, overlayH + 1 / 3);
+    const gOut = hue2rgb(p, q, overlayH);
+    const bOut = hue2rgb(p, q, overlayH - 1 / 3);
+
+    // Set buffer to the calculated overlay color
+    intView8.current[0] = Math.round(rOut * 255);
+    intView8.current[1] = Math.round(gOut * 255);
+    intView8.current[2] = Math.round(bOut * 255);
+    intView8.current[3] = 200; // ~80% Opacity
+
+    const fillColorInt = intView32.current[0];
+
+    // --- Fill & Punch ---
+    const imageData = ctx.createImageData(width, height);
+    const output32 = new Uint32Array(imageData.data.buffer);
+
+    // Fill entire overlay with mask color
+    output32.fill(fillColorInt);
 
     let matchCount = 0;
 
-    let avgBrightness = 0;
-    let sampleCount = 0;
-
-    for (let i = 0; i < data.length && sampleCount < 100; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const hex = rgbToHex(r, g, b);
-
-      if (highlightSet.has(hex)) {
-        avgBrightness += (r * 0.299 + g * 0.587 + b * 0.114);
-        sampleCount++;
+    // Iterate pixels and make matches transparent (punch holes)
+    if (targetSet.size === 1) {
+      const target = targetSet.values().next().value;
+      for (let i = 0; i < sourceData.length; i++) {
+        if (sourceData[i] === target) {
+          output32[i] = 0;
+          matchCount++;
+        }
+      }
+    } else {
+      for (let i = 0; i < sourceData.length; i++) {
+        if (targetSet.has(sourceData[i])) {
+          output32[i] = 0;
+          matchCount++;
+        }
       }
     }
 
-    avgBrightness = sampleCount > 0 ? avgBrightness / sampleCount : 128;
+    ctx.putImageData(imageData, 0, 0);
+    setMatchedCount(matchCount);
 
-    const useViolet = avgBrightness > 128;
-    const overlayR = useViolet ? 138 : 255;
-    const overlayG = useViolet ? 43 : 215;
-    const overlayB = useViolet ? 226 : 0;
+  }, [sourceData, width, height, hoveredColor, hoveredGroupId, colorGroups, mobileViewTarget]);
 
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const hex = rgbToHex(r, g, b);
-
-      if (highlightSet.has(hex)) {
-        outputData[i] = r;
-        outputData[i + 1] = g;
-        outputData[i + 2] = b;
-        outputData[i + 3] = 255;
-        matchCount++;
-      } else {
-        const grey = (r * 0.299 + g * 0.587 + b * 0.114) * 0.4;
-        outputData[i] = Math.round(grey * 0.7 + overlayR * 0.3);
-        outputData[i + 1] = Math.round(grey * 0.7 + overlayG * 0.3);
-        outputData[i + 2] = Math.round(grey * 0.7 + overlayB * 0.3);
-        outputData[i + 3] = 255;
-      }
-    }
-
-    ctx.putImageData(outputImageData, 0, 0);
-    setMatchedPixelCount(matchCount);
-  }, [sourceCanvas, hoveredColor, hoveredGroupId, colorGroups]);
-
-  const totalPixels = sourceCanvas.width * sourceCanvas.height;
-  const showZoomHint = matchedPixelCount > 0 && matchedPixelCount < totalPixels * 0.001;
+  const showZoomHint = matchedCount > 0 && matchedCount < (width * height * 0.001);
 
   return (
     <>
       <canvas
-        ref={overlayCanvasRef}
-        className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
       />
       {showZoomHint && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#33569a] text-white px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide shadow-lg z-20 flex items-center gap-2 animate-pulse-fast">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#33569a] text-white px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide shadow-lg z-30 flex items-center gap-2 animate-pulse-fast">
           <i className="fa-solid fa-search-plus"></i>
-          <span>Small area - {matchedPixelCount} pixels</span>
+          <span>Small area - {matchedCount} pixels</span>
         </div>
       )}
     </>
