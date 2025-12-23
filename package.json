@@ -1,17 +1,19 @@
-
 {
   "name": "irodori",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "concurrently \"npm run asbuild:watch\" \"vite\"",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "asbuild": "asc assembly/imageProcessor.ts --target release --outFile public/imageProcessor.wasm",
+    "asbuild:watch": "asc assembly/imageProcessor.ts --target release --outFile public/imageProcessor.wasm --watch",
+    "build": "npm run asbuild && tsc && vite build"
   },
   "dependencies": {
+    "@assemblyscript/loader": "^0.28.9",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
   },
@@ -19,6 +21,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "assemblyscript": "^0.28.9",
+    "concurrently": "^9.2.1",
     "gh-pages": "^6.3.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
