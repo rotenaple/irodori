@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ColorGroup } from '../types';
 
 // Moved outside and explicitly typed to resolve children property inference issues
@@ -42,7 +42,10 @@ interface ControlPanelProps {
   onMergeGroups: (sourceGroupId: string, targetGroupId: string) => void;
   onRecomputeGroups: () => void;
   setHoveredColor: (hex: string | null) => void;
+  hoveredGroupId: string | null;
   setHoveredGroupId: (id: string | null) => void;
+  draggedItem: { type: 'color' | 'group', colorHex?: string, groupId: string } | null;
+  setDraggedItem: (item: { type: 'color' | 'group', colorHex?: string, groupId: string } | null) => void;
   totalSamples: number;
 
   paletteLength: number;
@@ -65,7 +68,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   image, onImageUpload, colorGroups, manualLayerIds,
   selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget, onMoveColor,
-  onMergeGroups, onRecomputeGroups, setHoveredColor, setHoveredGroupId,
+  onMergeGroups, onRecomputeGroups, setHoveredColor, hoveredGroupId, setHoveredGroupId,
+  draggedItem, setDraggedItem,
   totalSamples,
   disableScaling, setDisableScaling,
   disablePostProcessing, setDisablePostProcessing,
@@ -73,8 +77,31 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   isSvg
 }) => {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
+  const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
 
   const toggleInfo = (key: string) => setActiveInfo(activeInfo === key ? null : key);
+
+  // Detect if touch device
+  const isTouchDevice = typeof window !== 'undefined' && 'ontouchstart' in window;
+
+  // Close all dropdowns and mobile popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement;
+
+      // Close mobile popup
+      if (mobilePopup && !target.closest('.mobile-color-popup') && !target.closest('.subcolor-btn')) {
+        setMobilePopup(null);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [mobilePopup]);
 
   return (
     <div className="flex flex-col gap-2 pb-0">
@@ -275,11 +302,37 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           const members = group.members || [];
 
           const groupPercent = totalSamples > 0 ? ((group.totalCount / totalSamples) * 100).toFixed(1) : '0';
+          const isDropTarget = draggedItem && draggedItem.groupId !== id;
 
           return (
             <div
               key={id}
-              className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'}`}
+              className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'} ${isDropTarget ? 'ring-2 ring-[#33569a] bg-[#33569a]/5' : ''}`}
+              draggable={!isManual}
+              onDragStart={(e) => {
+                if (!isManual) {
+                  setDraggedItem({ type: 'group', groupId: id });
+                  e.dataTransfer.effectAllowed = 'move';
+                }
+              }}
+              onDragEnd={() => setDraggedItem(null)}
+              onDragOver={(e) => {
+                if (draggedItem && draggedItem.groupId !== id) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (!draggedItem) return;
+
+                if (draggedItem.type === 'color' && draggedItem.colorHex) {
+                  onMoveColor(draggedItem.colorHex, draggedItem.groupId, id);
+                } else if (draggedItem.type === 'group') {
+                  onMergeGroups(draggedItem.groupId, id);
+                }
+                setDraggedItem(null);
+              }}
               onMouseEnter={() => setHoveredGroupId(id)}
               onMouseLeave={() => setHoveredGroupId(null)}
             >
@@ -318,25 +371,42 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   </button>
                 </div>
 
-                {/* Quick Merge Action (Simple version: click icon to select target or just a simple dropdown) */}
-                <div className="relative group/merge">
-                  <button className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-[#33569a] transition-colors">
-                    <i className="fa-solid fa-layer-group text-[9px]"></i>
+                {/* View in Image button */}
+                <button
+                  onClick={() => setHoveredGroupId(hoveredGroupId === id ? null : id)}
+                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors shrink-0 ${hoveredGroupId === id ? 'bg-[#33569a] text-white' : 'text-slate-300 hover:text-[#33569a] hover:bg-[#33569a]/10'}`}
+                  title="View in Image"
+                >
+                  <i className="fa-solid fa-eye text-[9px]"></i>
+                </button>
+
+                {/* Mobile: Tap to select for merging */}
+                {isTouchDevice && !isManual && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (draggedItem && draggedItem.groupId !== id) {
+                        // There's a selection - merge into this group
+                        if (draggedItem.type === 'group') {
+                          onMergeGroups(draggedItem.groupId, id);
+                        } else if (draggedItem.colorHex) {
+                          onMoveColor(draggedItem.colorHex, draggedItem.groupId, id);
+                        }
+                        setDraggedItem(null);
+                      } else if (draggedItem?.groupId === id) {
+                        // Deselect
+                        setDraggedItem(null);
+                      } else {
+                        // Select this group for moving
+                        setDraggedItem({ type: 'group', groupId: id });
+                      }
+                    }}
+                    className={`w-5 h-5 flex items-center justify-center rounded-full transition-all shrink-0 ${draggedItem?.groupId === id ? 'bg-[#33569a] text-white scale-110' : draggedItem && draggedItem.groupId !== id ? 'bg-[#33569a]/10 text-[#33569a] ring-2 ring-[#33569a]/30' : 'text-slate-300 active:text-[#33569a]'}`}
+                    title={draggedItem?.groupId === id ? 'Tap to deselect' : draggedItem ? 'Tap to merge here' : 'Tap to select for moving'}
+                  >
+                    <i className={`fa-solid ${draggedItem?.groupId === id ? 'fa-check' : draggedItem ? 'fa-arrow-down' : 'fa-grip-vertical'} text-[9px]`}></i>
                   </button>
-                  <div className="absolute right-0 top-full mt-1 hidden group-hover/merge:flex flex-col bg-white border border-slate-200 rounded-lg shadow-xl z-[100] min-w-[120px] p-1">
-                    <div className="text-[8px] font-bold uppercase text-slate-400 px-2 py-1">Merge into...</div>
-                    {colorGroups.filter(g => g.id !== id).map(target => (
-                      <button
-                        key={target.id}
-                        onClick={() => onMergeGroups(id, target.id)}
-                        className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded transition-colors text-left"
-                      >
-                        <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0].hex }} />
-                        <span className="text-[9px] font-medium text-slate-600 truncate">Group {target.id.split('-')[1]}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                )}
 
                 {isManual && (
                   <button onClick={() => onRemoveManualLayer(id)} className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors shrink-0">
@@ -346,28 +416,96 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               </div>
 
               {members.length > 1 && (
-                <div className="flex flex-wrap gap-1 px-5 pb-1">
+                <div className="flex flex-wrap gap-1 px-5 pb-1 relative">
                   {members.sort((a, b) => b.count - a.count).map(member => {
                     const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
-                    return (
-                      <div
-                        key={member.hex}
-                        className="w-4 h-4 rounded-full border border-black/5 relative group/member cursor-pointer"
-                        style={{ backgroundColor: member.hex }}
-                        onMouseEnter={() => setHoveredColor(member.hex)}
-                        onMouseLeave={() => setHoveredColor(null)}
-                      >
-                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 hidden group-hover/member:flex flex-col items-center bg-[#333] text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-lg z-50 whitespace-nowrap">
-                          <span>{memberPercent}%</span>
-                          <div className="absolute top-full border-4 border-transparent border-t-[#333]"></div>
-                        </div>
+                    const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
 
+                    return (
+                      <div key={member.hex} className="relative">
                         <button
-                          onClick={(e) => { e.stopPropagation(); onMoveColor(member.hex, id, 'new'); }}
-                          className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-white shadow-md border border-slate-100 rounded-[4px] px-1 text-[7px] font-bold text-[#33569a] opacity-0 group-hover/member:opacity-100 transition-opacity z-20 whitespace-nowrap"
+                          draggable={!isTouchDevice}
+                          onDragStart={(e) => {
+                            setDraggedItem({ type: 'color', colorHex: member.hex, groupId: id });
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.stopPropagation();
+                          }}
+                          onDragEnd={() => setDraggedItem(null)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isTouchDevice) {
+                              // Mobile: show popup
+                              setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent });
+                            } else {
+                              // Desktop: ungroup directly
+                              onMoveColor(member.hex, id, 'new');
+                            }
+                          }}
+                          onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)}
+                          onMouseLeave={() => !isTouchDevice && setHoveredColor(null)}
+                          className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member ${isPopupOpen ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`}
+                          style={{ backgroundColor: member.hex }}
+                          title={`${member.hex} (${memberPercent}%)`}
                         >
-                          Ungroup
+                          {/* Drag indicator - desktop only */}
+                          {!isTouchDevice && (
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full">
+                              <i className="fa-solid fa-grip-vertical text-[6px] text-white drop-shadow-md"></i>
+                            </div>
+                          )}
                         </button>
+
+                        {/* Mobile Popup */}
+                        {isPopupOpen && (
+                          <div className="mobile-color-popup absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 min-w-[120px]">
+                            <div className="text-center mb-2">
+                              <div className="w-8 h-8 rounded-full mx-auto border-2 border-black/10 shadow-inner" style={{ backgroundColor: member.hex }}></div>
+                              <div className="text-[9px] font-mono font-bold text-[#333] mt-1">{member.hex.toUpperCase()}</div>
+                              <div className="text-[8px] text-slate-400">{memberPercent}%</div>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <button
+                                onClick={() => {
+                                  setHoveredColor(member.hex);
+                                  setMobilePopup(null);
+                                }}
+                                className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"
+                              >
+                                <i className="fa-solid fa-eye text-[#33569a]"></i>
+                                <span>View in Image</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  onMoveColor(member.hex, id, 'new');
+                                  setMobilePopup(null);
+                                }}
+                                className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"
+                              >
+                                <i className="fa-solid fa-arrow-up-right-from-square text-[#33569a]"></i>
+                                <span>Ungroup Color</span>
+                              </button>
+                              <div className="border-t border-slate-100 pt-1 mt-1">
+                                <div className="text-[7px] uppercase text-slate-400 font-bold mb-1 px-2">Move to group</div>
+                                {colorGroups.filter(g => g.id !== id).slice(0, 4).map(target => (
+                                  <button
+                                    key={target.id}
+                                    onClick={() => {
+                                      onMoveColor(member.hex, id, target.id);
+                                      setMobilePopup(null);
+                                    }}
+                                    className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded text-left w-full"
+                                  >
+                                    <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0]?.hex }} />
+                                    <span className="text-[8px] text-slate-600 truncate">Group {target.id.split('-')[1]}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full">
+                              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-white"></div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -376,6 +514,29 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
           );
         })}
+
+        {/* New Group Drop Zone */}
+        {draggedItem && (
+          <div
+            className="p-3 rounded-xl border-2 border-dashed border-[#33569a] bg-[#33569a]/5 flex items-center justify-center gap-2 text-[#33569a] font-bold text-[10px] uppercase tracking-wide transition-all hover:bg-[#33569a]/10"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (!draggedItem) return;
+
+              if (draggedItem.type === 'color' && draggedItem.colorHex) {
+                onMoveColor(draggedItem.colorHex, draggedItem.groupId, 'new');
+              }
+              setDraggedItem(null);
+            }}
+          >
+            <i className="fa-solid fa-plus-circle"></i>
+            <span>Drop here to create new group</span>
+          </div>
+        )}
       </div>
     </div>
   );

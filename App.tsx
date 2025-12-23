@@ -48,6 +48,7 @@ const App: React.FC = () => {
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const [fullColorList, setFullColorList] = useState<ColorInstance[]>([]);
   const [totalSamples, setTotalSamples] = useState<number>(0);
+  const [draggedItem, setDraggedItem] = useState<{ type: 'color' | 'group', colorHex?: string, groupId: string } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sourceImageRef = useRef<HTMLImageElement>(null);
@@ -200,22 +201,41 @@ const App: React.FC = () => {
 
   const mergeGroups = (sourceGroupId: string, targetGroupId: string) => {
     if (sourceGroupId === targetGroupId) return;
+
+    let newRepresentative: string | undefined;
+
     setColorGroups(prev => {
       const sourceGroup = prev.find(g => g.id === sourceGroupId);
       if (!sourceGroup) return prev;
 
-      return prev.map(g => {
+      const updated = prev.map(g => {
         if (g.id === targetGroupId) {
           const members = [...g.members, ...sourceGroup.members];
+          // Sort by count and select the most common color as representative
+          const sortedMembers = [...members].sort((a, b) => b.count - a.count);
+          newRepresentative = sortedMembers[0].hex;
+
           return {
             ...g,
             members,
-            totalCount: members.reduce((sum, m) => sum + m.count, 0)
+            totalCount: members.reduce((sum, m) => sum + m.count, 0),
+            representativeHex: newRepresentative
           };
         }
         return g;
       }).filter(g => g.id !== sourceGroupId);
+
+      return updated;
     });
+
+    // Update selectedInGroup with the new representative
+    if (newRepresentative) {
+      setSelectedInGroup(prev => ({
+        ...prev,
+        [targetGroupId]: newRepresentative!
+      }));
+    }
+
     setEnabledGroups(prev => {
       const next = new Set(prev);
       next.delete(sourceGroupId);
@@ -417,7 +437,10 @@ const App: React.FC = () => {
               onMergeGroups={mergeGroups}
               onRecomputeGroups={recomputeGroups}
               setHoveredColor={setHoveredColor}
+              hoveredGroupId={hoveredGroupId}
               setHoveredGroupId={setHoveredGroupId}
+              draggedItem={draggedItem}
+              setDraggedItem={setDraggedItem}
               totalSamples={totalSamples}
               paletteLength={palette.length}
               disableScaling={disableScaling}

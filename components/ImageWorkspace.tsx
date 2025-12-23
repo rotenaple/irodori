@@ -372,6 +372,7 @@ interface HighlightOverlayProps {
 
 const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hoveredColor, hoveredGroupId, colorGroups }) => {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [matchedPixelCount, setMatchedPixelCount] = useState(0);
 
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
@@ -402,9 +403,37 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
       group?.members.forEach(m => highlightSet.add(m.hex.toLowerCase()));
     }
 
+
     if (highlightSet.size === 0) return;
 
-    // Iterate through source image and mark matching pixels
+    let matchCount = 0;
+
+    // Determine overlay color based on average brightness of matching pixels
+    let avgBrightness = 0;
+    let sampleCount = 0;
+
+    // First pass: calculate average brightness of matching pixels
+    for (let i = 0; i < data.length && sampleCount < 100; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const hex = rgbToHex(r, g, b);
+
+      if (highlightSet.has(hex)) {
+        avgBrightness += (r * 0.299 + g * 0.587 + b * 0.114);
+        sampleCount++;
+      }
+    }
+
+    avgBrightness = sampleCount > 0 ? avgBrightness / sampleCount : 128;
+
+    // Choose overlay color: violet for bright colors, yellow for dark colors
+    const useViolet = avgBrightness > 128;
+    const overlayR = useViolet ? 138 : 255;  // Violet: 138, Yellow: 255
+    const overlayG = useViolet ? 43 : 215;   // Violet: 43,  Yellow: 215
+    const overlayB = useViolet ? 226 : 0;    // Violet: 226, Yellow: 0
+
+    // Second pass: apply the overlay
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -412,23 +441,42 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({ sourceCanvas, hover
       const hex = rgbToHex(r, g, b);
 
       if (highlightSet.has(hex)) {
-        outputData[i] = 255;     // High contrast magenta for highlighting
-        outputData[i + 1] = 0;
-        outputData[i + 2] = 255;
+        // Keep original color for matching pixels
+        outputData[i] = r;
+        outputData[i + 1] = g;
+        outputData[i + 2] = b;
         outputData[i + 3] = 255;
+        matchCount++;
       } else {
-        outputData[i + 3] = 0;     // Transparent
+        // Apply colored overlay to non-matching pixels
+        const grey = (r * 0.299 + g * 0.587 + b * 0.114) * 0.4; // Darken to 40%
+        outputData[i] = Math.round(grey * 0.7 + overlayR * 0.3);
+        outputData[i + 1] = Math.round(grey * 0.7 + overlayG * 0.3);
+        outputData[i + 2] = Math.round(grey * 0.7 + overlayB * 0.3);
+        outputData[i + 3] = 255;
       }
     }
 
     ctx.putImageData(outputImageData, 0, 0);
+    setMatchedPixelCount(matchCount);
   }, [sourceCanvas, hoveredColor, hoveredGroupId, colorGroups]);
 
+  // Show zoom indicator for small pixel groups (less than 0.1% of image)
+  const totalPixels = sourceCanvas.width * sourceCanvas.height;
+  const showZoomHint = matchedPixelCount > 0 && matchedPixelCount < totalPixels * 0.001;
+
   return (
-    <canvas
-      ref={overlayCanvasRef}
-      className="absolute inset-0 w-full h-auto md:h-full object-contain pointer-events-none z-10 animate-pulse-fast mix-blend-screen"
-      style={{ filter: 'drop-shadow(0 0 2px rgba(255,0,255,0.8))' }}
-    />
+    <>
+      <canvas
+        ref={overlayCanvasRef}
+        className="absolute inset-0 w-full h-auto md:h-full object-contain pointer-events-none z-10"
+      />
+      {showZoomHint && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#33569a] text-white px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide shadow-lg z-20 flex items-center gap-2 animate-pulse-fast">
+          <i className="fa-solid fa-search-plus"></i>
+          <span>Small area - {matchedPixelCount} pixels</span>
+        </div>
+      )}
+    </>
   );
 };
