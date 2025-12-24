@@ -1,0 +1,94 @@
+From c5ba26daa06151cd37568c40794156c57979f69d Mon Sep 17 00:00:00 2001
+From: "copilot-swe-agent[bot]" <198982749+Copilot@users.noreply.github.com>
+Date: Wed, 24 Dec 2025 07:51:51 +0000
+Subject: [PATCH] Fix WebGPU data type mismatches causing black pixel output
+
+- Convert i32 shader outputs to Int16Array for CPU path compatibility
+- Fix buffer sizes to match i32 (4 bytes) instead of i16 (2 bytes)
+- Convert Int16Array inputs to Int32Array before passing to shaders
+- Affects all three phases: palette matching, edge protection, reconstruction
+---
+ utils/webgpuProcessor.ts | 32 ++++++++++++++++++++++++--------
+ 1 file changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/utils/webgpuProcessor.ts b/utils/webgpuProcessor.ts
+index f9f09cc..2e4c9e9 100644
+--- a/utils/webgpuProcessor.ts
++++ b/utils/webgpuProcessor.ts
+@@ -120,7 +120,13 @@ export class WebGPUProcessor {
+ 
+     // Read results
+     const resultBuffer = await readBuffer(this.device, outputBuffer, width * height * 4);
+-    const result = new Int16Array(resultBuffer);
++    const int32Result = new Int32Array(resultBuffer);
++    
++    // Convert from i32 to i16 for consistency with CPU path
++    const result = new Int16Array(width * height);
++    for (let i = 0; i < int32Result.length; i++) {
++      result[i] = int32Result[i];
++    }
+ 
+     // Cleanup
+     pixelBuffer.destroy();
+@@ -175,15 +181,16 @@ export class WebGPUProcessor {
+     });
+ 
+     // Ping-pong buffers for iterations
+-    let currentIndices = new Int16Array(inputIndices);
++    // Convert i16 input to i32 for shader
++    let currentIndices32 = new Int32Array(inputIndices);
+     
+     for (let iter = 0; iter < iterations; iter++) {
+-      const inputBuffer = createBuffer(this.device, currentIndices, GPUBufferUsage.STORAGE);
++      const inputBuffer = createBuffer(this.device, currentIndices32, GPUBufferUsage.STORAGE);
+       const pixelBuffer = createBuffer(this.device, packedPixels, GPUBufferUsage.STORAGE);
+       const paletteBuffer = createBuffer(this.device, paletteData, GPUBufferUsage.STORAGE);
+ 
+       const outputBuffer = this.device.createBuffer({
+-        size: width * height * 2,
++        size: width * height * 4, // i32 = 4 bytes per element
+         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+       });
+ 
+@@ -213,8 +220,8 @@ export class WebGPUProcessor {
+ 
+       this.device.queue.submit([commandEncoder.finish()]);
+ 
+-      const resultBuffer = await readBuffer(this.device, outputBuffer, width * height * 2);
+-      currentIndices = new Int16Array(resultBuffer);
++      const resultBuffer = await readBuffer(this.device, outputBuffer, width * height * 4);
++      currentIndices32 = new Int32Array(resultBuffer);
+ 
+       // Cleanup
+       inputBuffer.destroy();
+@@ -224,7 +231,13 @@ export class WebGPUProcessor {
+       paramsBuffer.destroy();
+     }
+ 
+-    return currentIndices;
++    // Convert from i32 back to i16 for consistency with CPU path
++    const result = new Int16Array(width * height);
++    for (let i = 0; i < currentIndices32.length; i++) {
++      result[i] = currentIndices32[i];
++    }
++
++    return result;
+   }
+ 
+   /**
+@@ -256,8 +269,11 @@ export class WebGPUProcessor {
+       paletteData[i * 4 + 3] = 0;
+     }
+ 
++    // Convert lowResIndices from i16 to i32 for shader
++    const lowResIndices32 = new Int32Array(lowResIndices);
++
+     // Create buffers
+-    const lowResBuffer = createBuffer(this.device, lowResIndices, GPUBufferUsage.STORAGE);
++    const lowResBuffer = createBuffer(this.device, lowResIndices32, GPUBufferUsage.STORAGE);
+     const highResBuffer = createBuffer(this.device, packedPixels, GPUBufferUsage.STORAGE);
+     const paletteBuffer = createBuffer(this.device, paletteData, GPUBufferUsage.STORAGE);
+ 
+-- 
+2.52.0
+
