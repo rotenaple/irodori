@@ -49,8 +49,10 @@ export type WorkerMessage = {
 };
 
 export type WorkerResponse = {
-  type: 'complete' | 'progress';
+  type: 'complete' | 'progress' | 'status';
   result?: Blob;
   progress?: number;
   error?: string;
+  webgpuAvailable?: boolean;
+  usingWebGPU?: boolean;
 };
