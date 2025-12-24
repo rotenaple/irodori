@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en" class=" idc0_343 vxkoxqw"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;</script>
+
+  <script type="module" src="test-worker-output_files/client"></script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Worker Output Comparison Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .result {
+      border: 1px solid #ccc;
+      padding: 10px;
+      flex: 1;
+    }
+    canvas {
+      border: 1px solid #000;
+      display: block;
+      margin: 10px 0;
+    }
+    .stats {
+      font-family: monospace;
+      background: #f0f0f0;
+      padding: 10px;
+      margin: 10px 0;
+      white-space: pre-wrap;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+    }
+    .status.running {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+    }
+    .status.success {
+      background: #d4edda;
+      border: 1px solid #28a745;
+    }
+    .status.error {
+      background: #f8d7da;
+      border: 1px solid #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <h1>Worker Output Comparison Test</h1>
+  <p>This test compares the output of the WebGPU and CPU worker implementations to ensure they produce identical results.</p>
+  
+  <div>
+    <button id="runTest">Run Comparison Test</button>
+    <button id="testCpuOnly">Force CPU Path Only</button>
+    <button id="clearResults">Clear Results</button>
+  </div>
+  
+  <div id="status" class="status error">Test failed! Outputs differ.</div>
+  
+  <div class="container">
+    <div class="result">
+      <h3>Test 1: Default (WebGPU if available)</h3>
+      <canvas id="canvas1" width="200" height="200"></canvas>
+      <div class="stats" id="stats1">
+Duration: 2324.00ms
+Size: 1.50 KB
+Dimensions: 200x200
+Total Pixels: 40000
+Non-zero Pixels: 40000 (100.00%)
+Unique Colors: 17
+
+Top Colors:
+  255,0,0: 9801 pixels
+  0,255,0: 9801 pixels
+  0,0,255: 9801 pixels
+  255,255,0: 9801 pixels
+  4,255,0: 100 pixels
+</div>
+    </div>
+    
+    <div class="result">
+      <h3>Test 2: Default (Second Run)</h3>
+      <canvas id="canvas2" width="200" height="200"></canvas>
+      <div class="stats" id="stats2">
+Duration: 4866.00ms
+Size: 1.43 KB
+Dimensions: 200x200
+Total Pixels: 40000
+Non-zero Pixels: 40000 (100.00%)
+Unique Colors: 4
+
+Top Colors:
+  0,0,0: 39530 pixels
+  0,0,1: 198 pixels
+  0,0,2: 176 pixels
+  0,0,3: 96 pixels
+</div>
+    </div>
+  </div>
+  
+  <div class="result">
+    <h3>Comparison Results</h3>
+    <div class="stats" id="comparison">
+Comparison Results:
+===================
+Match: NO ✗
+
+Differences: 51263 / 160000 (32.0394%)
+Max Difference: 255
+
+Sample Differences:
+  Pixel 0 R: 255 vs 0 (diff: 255)
+  Pixel 1 R: 255 vs 0 (diff: 255)
+  Pixel 2 R: 255 vs 0 (diff: 255)
+  Pixel 3 R: 255 vs 0 (diff: 255)
+  Pixel 4 R: 255 vs 0 (diff: 255)
+  Pixel 5 R: 255 vs 0 (diff: 255)
+  Pixel 6 R: 255 vs 0 (diff: 255)
+  Pixel 7 R: 255 vs 0 (diff: 255)
+  Pixel 8 R: 255 vs 0 (diff: 255)
+  Pixel 9 R: 255 vs 0 (diff: 255)
+</div>
+  </div>
+
+  <script type="module" src="test-worker-output_files/test-worker-output.html"></script>
+
+
+</body></html>
