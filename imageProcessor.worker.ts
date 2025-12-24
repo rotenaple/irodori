@@ -9,6 +9,59 @@ import {
     getColorDistance
 } from './utils/colorUtils';
 
+/**
+ * Intelligently compresses an image to fit within the target size limit.
+ * Uses binary search to find the highest JPEG quality that fits, or falls back to PNG.
+ */
+async function intelligentCompress(
+    canvas: OffscreenCanvas,
+    isAutoMode: boolean
+): Promise<Blob> {
+    const TARGET_SIZE = 150 * 1024; // 150KB in bytes
+    
+    if (!isAutoMode) {
+        // For non-auto modes, use PNG without compression
+        return await canvas.convertToBlob({ type: 'image/png' });
+    }
+    
+    // Try PNG first
+    const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+    
+    if (pngBlob.size <= TARGET_SIZE) {
+        // PNG is already small enough, use it
+        return pngBlob;
+    }
+    
+    // PNG is too large, use JPEG with intelligent quality selection
+    // Binary search for optimal quality
+    let bestBlob = pngBlob;
+    let bestQuality = 0;
+    let low = 0.5;
+    let high = 0.95;
+    const tolerance = 0.02;
+    
+    while (high - low > tolerance) {
+        const mid = (low + high) / 2;
+        const testBlob = await canvas.convertToBlob({ 
+            type: 'image/jpeg', 
+            quality: mid 
+        });
+        
+        if (testBlob.size <= TARGET_SIZE) {
+            // This quality works, try higher
+            bestBlob = testBlob;
+            bestQuality = mid;
+            low = mid;
+        } else {
+            // Too large, try lower quality
+            high = mid;
+        }
+    }
+    
+    // If we found a JPEG that fits, use it; otherwise fall back to PNG
+    return bestQuality > 0 ? bestBlob : pngBlob;
+}
+
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     if (e.data.type !== 'process') return;
 
@@ -75,7 +128,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             fCtx.imageSmoothingQuality = 'high';
             fCtx.drawImage(nativeCanvas, 0, 0, finalW, finalH);
 
-            const blob = await finalCanvas.convertToBlob({ type: 'image/png' });
+            const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
             self.postMessage({ type: 'complete', result: blob });
             return;
         }
@@ -500,7 +553,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         fCtx.imageSmoothingQuality = 'high';
         fCtx.drawImage(workspaceCanvas, 0, 0, finalCanvas.width, finalCanvas.height);
 
-        const blob = await finalCanvas.convertToBlob({ type: 'image/png' });
+        const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
         self.postMessage({ type: 'complete', result: blob });
 
     } catch (error: any) {
