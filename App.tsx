@@ -309,9 +309,10 @@ const App: React.FC = () => {
           setProcessingState('completed');
           setActiveTab('processed');
           
-          // Update WebGPU usage status from processing result
+          // Update WebGPU availability status from processing result
           if (gpuAvailable !== undefined) setWebgpuAvailable(gpuAvailable);
-          if (gpuUsed !== undefined) setUsingWebGPU(gpuUsed);
+          // Reset to not actively using WebGPU after processing completes
+          setUsingWebGPU(false);
         } else if (error) {
           setProcessingState('idle');
           alert(`Error processing image: ${error}`);
