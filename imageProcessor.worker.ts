@@ -35,7 +35,7 @@ async function intelligentCompress(
     // PNG is too large, use JPEG with intelligent quality selection
     // Binary search for optimal quality
     let bestBlob = pngBlob;
-    let bestQuality = 0;
+    let bestQuality = 0.5; // Initialize to minimum quality
     let low = 0.5;
     let high = 0.95;
     const tolerance = 0.02;
@@ -59,7 +59,7 @@ async function intelligentCompress(
     }
     
     // If we found a JPEG that fits, use it; otherwise fall back to PNG
-    return bestQuality > 0 ? bestBlob : pngBlob;
+    return bestBlob;
 }
 
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {

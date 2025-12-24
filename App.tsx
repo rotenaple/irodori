@@ -365,9 +365,9 @@ const App: React.FC = () => {
   };
 
   const downloadImage = () => {
-    if (processedImage && processedBlob) {
+    if (processedBlob) {
       const link = document.createElement('a');
-      link.href = processedImage;
+      link.href = processedImage!;
       const dotIndex = originalFileName.lastIndexOf('.');
       const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
       
