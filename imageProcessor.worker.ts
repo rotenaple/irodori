@@ -347,7 +347,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 );
 
                 // Put processed data back to canvas
-                wCtx.putImageData(new ImageData(outputData, finalWorkspaceWidth, finalWorkspaceHeight), 0, 0);
+                const imageData = new ImageData(new Uint8ClampedArray(outputData), finalWorkspaceWidth, finalWorkspaceHeight);
+                wCtx.putImageData(imageData, 0, 0);
 
                 const finalCanvas = new OffscreenCanvas(Math.round(nativeWidth * targetUpscale), Math.round(nativeHeight * targetUpscale));
                 const fCtx = finalCanvas.getContext('2d');
@@ -699,15 +700,15 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     finalColor = { ...rgb, id: p.id };
                 } else if (effectiveSmoothingLevels === 0) {
                     const p1 = matchPalette[blendA], p2 = matchPalette[blendB];
-                    const dist1 = (currentRefColor.r - p1.r) ** 2 + (currentRefColor.g - p1.g) ** 2 + (currentRefColor.b - p1.b) ** 2;
-                    const dist2 = (currentRefColor.r - p2.r) ** 2 + (currentRefColor.g - p2.g) ** 2 + (currentRefColor.b - p2.b) ** 2;
+                    const dist1 = (refR - p1.r) ** 2 + (refG - p1.g) ** 2 + (refB - p1.b) ** 2;
+                    const dist2 = (refR - p2.r) ** 2 + (refG - p2.g) ** 2 + (refB - p2.b) ** 2;
                     const winner = dist1 < dist2 ? p1 : p2;
                     const rgb = winner.targetHex ? hexToRgb(winner.targetHex)! : { r: winner.r, g: winner.g, b: winner.b };
                     finalColor = { ...rgb, id: winner.id };
                 } else {
                     const c1p = matchPalette[blendA], c2p = matchPalette[blendB];
                     const dr = c2p.r - c1p.r, dg = c2p.g - c1p.g, db = c2p.b - c1p.b;
-                    const pr = currentRefColor.r - c1p.r, pg = currentRefColor.g - c1p.g, pb = currentRefColor.b - c1p.b;
+                    const pr = refR - c1p.r, pg = refG - c1p.g, pb = refB - c1p.b;
                     const lenSq = dr * dr + dg * dg + db * db;
 
                     let bestT = 0;
@@ -757,9 +758,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                     // 2. CONTEXTUAL BLIP FILTER:
                     if (bestT > 0 && bestT < 0.25) {
-                        const r = currentRefColor.r, g = currentRefColor.g, b = currentRefColor.b;
                         const c1 = matchPalette[blendA], c2 = matchPalette[blendB];
-                        const noiseDistSq = (r - c1.r) ** 2 + (g - c1.g) ** 2 + (b - c1.b) ** 2;
+                        const noiseDistSq = (refR - c1.r) ** 2 + (refG - c1.g) ** 2 + (refB - c1.b) ** 2;
                         const transitionDistSq = (c1.r - c2.r) ** 2 + (c1.g - c2.g) ** 2 + (c1.b - c2.b) ** 2;
                         // Reduce blip filter sensitivity as intensity increases
                         const blipSensitivity = 0.05 * (1 - intensity);

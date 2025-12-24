@@ -51,7 +51,7 @@ export async function initWebGPU(): Promise<WebGPUContext | null> {
  */
 export function createBuffer(
   device: GPUDevice,
-  data: Float32Array | Uint32Array | Int16Array,
+  data: Float32Array | Uint32Array | Int16Array | Int32Array | Uint8ClampedArray,
   usage: GPUBufferUsageFlags
 ): GPUBuffer {
   const buffer = device.createBuffer({
