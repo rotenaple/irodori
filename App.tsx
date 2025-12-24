@@ -45,6 +45,10 @@ const App: React.FC = () => {
   const [originalSize, setOriginalSize] = useState<number>(0);
   const [processedSize, setProcessedSize] = useState<number>(0);
 
+  // WebGPU status tracking
+  const [webgpuAvailable, setWebgpuAvailable] = useState<boolean | null>(null);
+  const [usingWebGPU, setUsingWebGPU] = useState<boolean>(false);
+
   const [editTarget, setEditTarget] = useState<{ id: string, type: 'original' | 'recolor' } | null>(null);
   const [hoveredColor, setHoveredColor] = useState<string | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
@@ -288,7 +292,15 @@ const App: React.FC = () => {
   useEffect(() => {
     workerRef.current = new Worker(new URL('./imageProcessor.worker.ts', import.meta.url), { type: 'module' });
     workerRef.current.onmessage = (e: MessageEvent<import('./types').WorkerResponse>) => {
-      const { type, result, error } = e.data;
+      const { type, result, error, webgpuAvailable: gpuAvailable, usingWebGPU: gpuUsed } = e.data;
+      
+      // Handle WebGPU status updates
+      if (type === 'status') {
+        if (gpuAvailable !== undefined) setWebgpuAvailable(gpuAvailable);
+        if (gpuUsed !== undefined) setUsingWebGPU(gpuUsed);
+        return;
+      }
+      
       if (type === 'complete') {
         if (result) {
           setProcessedSize(result.size);
@@ -296,6 +308,10 @@ const App: React.FC = () => {
           setProcessedImage(URL.createObjectURL(result));
           setProcessingState('completed');
           setActiveTab('processed');
+          
+          // Update WebGPU usage status from processing result
+          if (gpuAvailable !== undefined) setWebgpuAvailable(gpuAvailable);
+          if (gpuUsed !== undefined) setUsingWebGPU(gpuUsed);
         } else if (error) {
           setProcessingState('idle');
           alert(`Error processing image: ${error}`);
@@ -394,7 +410,10 @@ const App: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-white overflow-hidden">
-      <Header />
+      <Header 
+        webgpuAvailable={webgpuAvailable}
+        usingWebGPU={usingWebGPU}
+      />
       <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
         <aside className="w-full md:w-96 lg:w-[420px] px-0 md:pl-10 flex-none md:h-full border-r border-[#333]/5 bg-white flex flex-col relative z-10">
           <div className="px-4 md:px-6 py-4 overflow-y-auto md:overflow-y-auto custom-scrollbar flex-1 min-h-[400px] md:min-h-0">
