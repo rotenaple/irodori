@@ -4,6 +4,13 @@
 
 The WebGPU implementation in PR #4 produces black pixels instead of colored output. The root cause is **data type mismatches** between WGSL shaders and TypeScript code.
 
+## Important Note
+
+**Palette indices are guaranteed to be small values (0-255)** due to `MAX_PALETTE_SIZE = 256` constant in the codebase. This means:
+- All indices safely fit within Int16 range (-32,768 to 32,767)
+- No data loss occurs during i32 → Int16Array conversion
+- No bounds checking needed for this specific use case
+
 ## Root Cause Analysis
 
 ### The Bug
