@@ -2,6 +2,8 @@
  * WebGPU compute shaders for image processing operations
  */
 
+import { MAX_PALETTE_SIZE } from './processingConstants';
+
 /**
  * Shader for palette matching (Phase 1)
  * Maps each pixel to the closest palette color using Euclidean distance
@@ -28,6 +30,7 @@ struct Color {
 @group(0) @binding(4) var<storage, read_write> outputIndices: array<i32>;
 @group(0) @binding(5) var<uniform> params: Params;
 
+// Note: MAX_PALETTE_SIZE = 256 (defined in processingConstants.ts)
 fn colorDistance(r1: f32, g1: f32, b1: f32, r2: f32, g2: f32, b2: f32) -> f32 {
   let dr = r1 - r2;
   let dg = g1 - g2;

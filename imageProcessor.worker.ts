@@ -9,6 +9,7 @@ import {
     getColorDistance
 } from './utils/colorUtils';
 import { createWebGPUProcessor, WebGPUProcessor } from './utils/webgpuProcessor';
+import { MAX_PALETTE_SIZE, MAX_WORKSPACE_PIXELS, NS_TARGET_SIZE } from './utils/processingConstants';
 
 // Global WebGPU processor instance (initialized lazily)
 let webgpuProcessor: WebGPUProcessor | null | undefined = undefined;
@@ -60,7 +61,7 @@ async function intelligentCompress(
     canvas: OffscreenCanvas,
     isAutoMode: boolean
 ): Promise<Blob> {
-    const TARGET_SIZE = 150 * 1024; // 150KB in bytes
+    const TARGET_SIZE = NS_TARGET_SIZE;
     
     if (!isAutoMode) {
         // For non-auto modes, use PNG without compression
@@ -315,9 +316,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const workspaceWidth = Math.round(nativeWidth * workspaceScale);
                 const workspaceHeight = Math.round(nativeHeight * workspaceScale);
 
-                const MAX_PIXELS = 10000000;
                 const currentPixels = workspaceWidth * workspaceHeight;
-                const safeScale = currentPixels > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
+                const safeScale = currentPixels > MAX_WORKSPACE_PIXELS ? Math.sqrt(MAX_WORKSPACE_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
 
                 const finalWorkspaceWidth = Math.round(nativeWidth * safeScale);
                 const finalWorkspaceHeight = Math.round(nativeHeight * safeScale);
@@ -429,8 +429,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             const paletteSize = matchPalette.length;
             
             // Optimize: Pre-allocate array for counting instead of Map
-            const maxCounts = 256;
-            const localCountsArray = new Uint16Array(maxCounts);
+            const localCountsArray = new Uint16Array(MAX_PALETTE_SIZE);
 
             for (let iter = 0; iter < iterations; iter++) {
                 for (let y = 0; y < nativeHeight; y++) {
@@ -454,7 +453,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         for (let ny = yStart; ny <= yEnd; ny++) {
                             for (let nx = xStart; nx <= xEnd; nx++) {
                                 const nIdx = lowResIdxMap[ny * nativeWidth + nx];
-                                if (nIdx >= 0 && nIdx < maxCounts) {
+                                if (nIdx >= 0 && nIdx < MAX_PALETTE_SIZE) {
                                     localCountsArray[nIdx]++;
                                 }
                             }
@@ -537,9 +536,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const workspaceWidth = Math.round(nativeWidth * workspaceScale);
         const workspaceHeight = Math.round(nativeHeight * workspaceScale);
 
-        const MAX_PIXELS = 10000000;
         const currentPixels = workspaceWidth * workspaceHeight;
-        const safeScale = currentPixels > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
+        const safeScale = currentPixels > MAX_WORKSPACE_PIXELS ? Math.sqrt(MAX_WORKSPACE_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
 
         const finalWorkspaceWidth = Math.round(nativeWidth * safeScale);
         const finalWorkspaceHeight = Math.round(nativeHeight * safeScale);
@@ -559,8 +557,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const scaleY = finalWorkspaceHeight / nativeHeight;
         
         // Optimize: Pre-allocate arrays for local weights
-        const maxPaletteSize = 256;
-        const localWeightsArray = new Float32Array(maxPaletteSize);
+        const localWeightsArray = new Float32Array(MAX_PALETTE_SIZE);
 
         for (let y = 0; y < finalWorkspaceHeight; y++) {
             // Pre-calculate Y neighbors
@@ -596,7 +593,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         if (dx > 0 || dy > 0) weight = 0.5;
                         if (dx > 1 || dy > 1) weight = 0.2;
 
-                        if (nIdx >= 0 && nIdx < maxPaletteSize) {
+                        if (nIdx >= 0 && nIdx < MAX_PALETTE_SIZE) {
                             localWeightsArray[nIdx] += weight;
                         }
                     }
