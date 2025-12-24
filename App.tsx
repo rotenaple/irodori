@@ -33,6 +33,7 @@ const App: React.FC = () => {
   const [denoiseRadius, setDenoiseRadius] = useState<number>(0);
   const [edgeProtection, setEdgeProtection] = useState<number>(50);
   const [vertexInertia, setVertexInertia] = useState<number>(100);
+  const [colorGroupingDistance, setColorGroupingDistance] = useState<number>(45);
   const [disableRecoloring, setDisableRecoloring] = useState<boolean>(false);
   const [disablePostProcessing, setDisablePostProcessing] = useState<boolean>(false);
   const [disableScaling, setDisableScaling] = useState<boolean>(false);
@@ -84,8 +85,10 @@ const App: React.FC = () => {
         textReader.readAsText(file);
         setDisableScaling(true);
         setDisablePostProcessing(true);
+        setColorGroupingDistance(15); // SVG uses tighter grouping
       } else {
         setSvgContent(null);
+        setColorGroupingDistance(45); // Raster images use looser grouping
       }
 
       const reader = new FileReader();
@@ -130,9 +133,9 @@ const App: React.FC = () => {
 
           let extractionResult;
           if (isSvg && svgContent) {
-            extractionResult = extractSvgColors(svgContent);
+            extractionResult = extractSvgColors(svgContent, colorGroupingDistance);
           } else {
-            extractionResult = extractColorGroups(imageData);
+            extractionResult = extractColorGroups(imageData, colorGroupingDistance);
           }
 
           const allFoundColors: ColorInstance[] = [];
@@ -172,7 +175,7 @@ const App: React.FC = () => {
         }
       };
     }
-  }, [image, isSvg, svgContent]);
+  }, [image, isSvg, svgContent, colorGroupingDistance]);
 
   const moveColorToGroup = (colorHex: string, sourceGroupId: string, targetGroupId: string | 'new') => {
     setColorGroups(prev => {
@@ -402,6 +405,7 @@ const App: React.FC = () => {
               smoothingLevels={smoothingLevels} setSmoothingLevels={setSmoothingLevels}
               edgeProtection={edgeProtection} setEdgeProtection={setEdgeProtection}
               vertexInertia={vertexInertia} setVertexInertia={setVertexInertia}
+              colorGroupingDistance={colorGroupingDistance} setColorGroupingDistance={setColorGroupingDistance}
               image={image} onImageUpload={handleImageUpload}
               colorGroups={colorGroups} manualLayerIds={manualLayerIds}
               selectedInGroup={selectedInGroup} enabledGroups={enabledGroups} setEnabledGroups={setEnabledGroups}

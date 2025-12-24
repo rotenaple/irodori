@@ -141,7 +141,7 @@ export const extractColorGroups = (imageData: ImageData, distanceThreshold: numb
   return processFrequencyMap(frequencyMap, totalSamples, distanceThreshold);
 };
 
-export const extractSvgColors = (svgContent: string): ExtractionResult => {
+export const extractSvgColors = (svgContent: string, distanceThreshold: number = 15): ExtractionResult => {
   const frequencyMap: Record<string, number> = {};
   let totalSamples = 0;
 
@@ -181,8 +181,8 @@ export const extractSvgColors = (svgContent: string): ExtractionResult => {
     }
   }
 
-  // For SVGs, we use a much tighter distance threshold as colors are usually intentional
-  return processFrequencyMap(frequencyMap, totalSamples, 15);
+  // For SVGs, we use the configurable distance threshold
+  return processFrequencyMap(frequencyMap, totalSamples, distanceThreshold);
 };
 
 const processFrequencyMap = (frequencyMap: Record<string, number>, totalSamples: number, distanceThreshold: number): ExtractionResult => {
