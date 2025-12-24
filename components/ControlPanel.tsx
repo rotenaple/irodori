@@ -22,6 +22,8 @@ interface ControlPanelProps {
   setVertexInertia: (v: number) => void;
   edgeProtection: number;
   setEdgeProtection: (v: number) => void;
+  colorGroupingDistance: number;
+  setColorGroupingDistance: (v: number) => void;
   image: string | null;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   colorGroups: ColorGroup[];
@@ -56,7 +58,8 @@ interface ControlPanelProps {
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   upscaleFactor, setUpscaleFactor, denoiseRadius, setDenoiseRadius, smoothingLevels, setSmoothingLevels,
-  vertexInertia, setVertexInertia, edgeProtection, setEdgeProtection, image, onImageUpload,
+  vertexInertia, setVertexInertia, edgeProtection, setEdgeProtection, colorGroupingDistance, setColorGroupingDistance,
+  image, onImageUpload,
   colorGroups, manualLayerIds, selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget, onMoveColor, onMergeGroups, onRecomputeGroups,
   setHoveredColor, hoveredGroupId, setHoveredGroupId, draggedItem, setDraggedItem, totalSamples,
@@ -184,6 +187,19 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <button onClick={onAddManualLayer} disabled={disableRecoloring} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}><i className="fa-solid fa-plus mr-1"></i> Add</button>
           </div>
         </div>
+        
+        <div className={`space-y-0.5 mb-2 transition-opacity ${disableRecoloring ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+            <div className="flex items-center gap-2">
+              <span>Color Grouping</span>
+              <button onClick={() => toggleInfo('grouping')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+            </div>
+            <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{colorGroupingDistance}</span>
+          </div>
+          <input type="range" min="5" max="100" step="5" value={colorGroupingDistance} onChange={(e) => setColorGroupingDistance(parseInt(e.target.value))} className="custom-slider" />
+          {activeInfo === 'grouping' && <InfoBox>Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups.</InfoBox>}
+        </div>
+        
         <p className="text-[10px] text-slate-500 leading-tight">Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.</p>
       </div>
 
