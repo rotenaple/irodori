@@ -37,7 +37,7 @@ See `WEBGPU_FIX.md` for detailed code changes.
 
 ## How to Apply the Fix to PR #4
 
-\`\`\`bash
+```bash
 # Checkout the WebGPU PR branch
 git checkout copilot/optimize-worker-performance-webgpu
 
@@ -47,7 +47,7 @@ git apply webgpu-data-type-fix.patch
 # Build and test
 npm run build
 npm run dev
-\`\`\`
+```
 
 ## How to Test
 
@@ -55,29 +55,29 @@ npm run dev
 - WebGPU-capable browser (Chrome 113+, Edge 113+)
 
 ### Test Steps
-1. Open: \`http://localhost:5173/test-worker-output.html\`
+1. Open: `http://localhost:5173/test-worker-output.html`
 2. Click "Run Comparison Test"
 
 ### Expected Results
 
 **Before fix:**
-\`\`\`
+```
 Test 1: Almost all black pixels
 Test 2: Correct colored output
 Comparison: NO MATCH ✗ (32% differences)
-\`\`\`
+```
 
 **After fix:**
-\`\`\`
+```
 Test 1: Correct colored output
 Test 2: Correct colored output  
 Comparison: MATCH ✓ (0% differences)
-\`\`\`
+```
 
 ## Technical Details
 
-- WGSL only supports \`i32\` and \`u32\` (no i16 type exists)
-- CPU path uses \`Int16Array\` for memory efficiency
+- WGSL only supports `i32` and `u32` (no i16 type exists)
+- CPU path uses `Int16Array` for memory efficiency
 - Solution: Convert at GPU/CPU boundary
 - Performance impact: Minimal (~0.1ms per conversion)
 
