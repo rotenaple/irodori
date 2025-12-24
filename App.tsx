@@ -39,6 +39,7 @@ const App: React.FC = () => {
 
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
   const [activeTab, setActiveTab] = useState<'original' | 'processed'>('original');
   const [originalSize, setOriginalSize] = useState<number>(0);
   const [processedSize, setProcessedSize] = useState<number>(0);
@@ -91,6 +92,7 @@ const App: React.FC = () => {
       reader.onload = (event) => {
         setImage(event.target?.result as string);
         setProcessedImage(null);
+        setProcessedBlob(null);
         setProcessingState('idle');
         setColorGroups([]);
         setSelectedInGroup({});
@@ -287,6 +289,7 @@ const App: React.FC = () => {
       if (type === 'complete') {
         if (result) {
           setProcessedSize(result.size);
+          setProcessedBlob(result);
           setProcessedImage(URL.createObjectURL(result));
           setProcessingState('completed');
           setActiveTab('processed');
@@ -309,6 +312,7 @@ const App: React.FC = () => {
         const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides);
         const blob = new Blob([recoloredSvgContent], { type: 'image/svg+xml' });
         setProcessedSize(blob.size);
+        setProcessedBlob(blob);
         setProcessedImage(URL.createObjectURL(blob));
         setProcessingState('completed');
         setActiveTab('processed');
@@ -361,13 +365,23 @@ const App: React.FC = () => {
   };
 
   const downloadImage = () => {
-    if (processedImage) {
+    if (processedBlob) {
       const link = document.createElement('a');
-      link.href = processedImage;
+      link.href = processedImage!;
       const dotIndex = originalFileName.lastIndexOf('.');
       const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
-      if (isSvg) link.download = `${baseName}-irodori.svg`;
-      else link.download = `${baseName}-irodori.png`;
+      
+      // Determine file extension based on blob type
+      if (processedBlob.type === 'image/svg+xml') {
+        link.download = `${baseName}-irodori.svg`;
+      } else if (processedBlob.type === 'image/jpeg') {
+        link.download = `${baseName}-irodori.jpg`;
+      } else if (processedBlob.type === 'image/gif') {
+        link.download = `${baseName}-irodori.gif`;
+      } else {
+        link.download = `${baseName}-irodori.png`;
+      }
+      
       link.click();
     }
   };

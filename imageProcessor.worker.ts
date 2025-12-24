@@ -9,6 +9,95 @@ import {
     getColorDistance
 } from './utils/colorUtils';
 
+/**
+ * Finds the optimal quality for a given format using binary search.
+ * Returns the blob and quality that fits within the target size.
+ */
+async function findOptimalQuality(
+    canvas: OffscreenCanvas,
+    format: string,
+    targetSize: number,
+    minQuality: number = 0.5,
+    maxQuality: number = 1.0
+): Promise<{ blob: Blob | null; quality: number }> {
+    let bestBlob: Blob | null = null;
+    let bestQuality = minQuality;
+    let low = minQuality;
+    let high = maxQuality;
+    const tolerance = 0.01; // Higher precision for better quality
+    
+    while (high - low > tolerance) {
+        const mid = (low + high) / 2;
+        const testBlob = await canvas.convertToBlob({ 
+            type: format, 
+            quality: mid 
+        });
+        
+        if (testBlob.size <= targetSize) {
+            // This quality works, try higher
+            bestBlob = testBlob;
+            bestQuality = mid;
+            low = mid;
+        } else {
+            // Too large, try lower quality
+            high = mid;
+        }
+    }
+    
+    return { blob: bestBlob, quality: bestQuality };
+}
+
+/**
+ * Intelligently compresses an image to fit within the target size limit.
+ * For nationstates.net compatibility, tries PNG (preferred), GIF, and JPEG formats.
+ * Prioritizes PNG for lossless quality, then GIF for flag-style images.
+ */
+async function intelligentCompress(
+    canvas: OffscreenCanvas,
+    isAutoMode: boolean
+): Promise<Blob> {
+    const TARGET_SIZE = 150 * 1024; // 150KB in bytes
+    
+    if (!isAutoMode) {
+        // For non-auto modes, use PNG without compression
+        return await canvas.convertToBlob({ type: 'image/png' });
+    }
+    
+    // Try PNG first - it's lossless, so if it fits, it's the best choice for flags
+    const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+    
+    if (pngBlob.size <= TARGET_SIZE) {
+        return pngBlob;
+    }
+    
+    // PNG is too large, try other formats
+    let bestBlob: Blob = pngBlob;
+    let bestFormat = 'png';
+    
+    // Try GIF - good for flag-style images with limited colors, avoids JPEG artifacts
+    try {
+        const gifBlob = await canvas.convertToBlob({ type: 'image/gif' });
+        if (gifBlob.size <= TARGET_SIZE) {
+            // GIF fits and is lossless for images with limited colors
+            bestBlob = gifBlob;
+            bestFormat = 'gif';
+        }
+    } catch (e) {
+        // GIF encoding might not be supported in all environments
+    }
+    
+    // Only try JPEG as last resort - JPEG creates artifacts on flag-style images
+    if (bestFormat === 'png') {
+        const jpegResult = await findOptimalQuality(canvas, 'image/jpeg', TARGET_SIZE, 0.5, 1.0);
+        if (jpegResult.blob && jpegResult.blob.size <= TARGET_SIZE) {
+            bestBlob = jpegResult.blob;
+            bestFormat = 'jpeg';
+        }
+    }
+    
+    return bestBlob;
+}
+
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     if (e.data.type !== 'process') return;
 
@@ -75,7 +164,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             fCtx.imageSmoothingQuality = 'high';
             fCtx.drawImage(nativeCanvas, 0, 0, finalW, finalH);
 
-            const blob = await finalCanvas.convertToBlob({ type: 'image/png' });
+            const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
             self.postMessage({ type: 'complete', result: blob });
             return;
         }
@@ -500,7 +589,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         fCtx.imageSmoothingQuality = 'high';
         fCtx.drawImage(workspaceCanvas, 0, 0, finalCanvas.width, finalCanvas.height);
 
-        const blob = await finalCanvas.convertToBlob({ type: 'image/png' });
+        const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
         self.postMessage({ type: 'complete', result: blob });
 
     } catch (error: any) {
