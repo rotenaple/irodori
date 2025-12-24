@@ -146,6 +146,7 @@ async function processWithWebGPU(
     }
 
     // Phase 1: Palette matching
+    console.log('[WebGPU] Phase 1: Palette matching');
     const lowResIdxMap = await webgpuProcessor.paletteMatching(
         nativePixelData,
         nativeWidth,
@@ -153,10 +154,12 @@ async function processWithWebGPU(
         matchPalette,
         colorToGroupIdx
     );
+    console.log('[WebGPU] Palette matching complete, indices:', lowResIdxMap.slice(0, 20));
 
     // Phase 2: Edge protection
     let processedIndices = lowResIdxMap;
     if (edgeProtection > 0) {
+        console.log('[WebGPU] Phase 2: Edge protection');
         let radius = Math.max(1, Math.round((edgeProtection / 100) * 3));
         let iterations = Math.max(1, Math.round((edgeProtection / 100) * 4));
         if (edgeProtection > 66) { radius = 3; iterations = 3; }
@@ -171,9 +174,11 @@ async function processWithWebGPU(
             radius,
             iterations
         );
+        console.log('[WebGPU] Edge protection complete, indices:', processedIndices.slice(0, 20));
     }
 
     // Phase 3: High-resolution reconstruction
+    console.log('[WebGPU] Phase 3: Reconstruction');
     const outputData = await webgpuProcessor.reconstruction(
         processedIndices,
         highResPixelData,
@@ -333,6 +338,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const highResPixelData = wCtx.getImageData(0, 0, finalWorkspaceWidth, finalWorkspaceHeight).data;
 
                 // Process with WebGPU
+                console.log('[WebGPU] Processing image:', {
+                    nativeSize: `${nativeWidth}x${nativeHeight}`,
+                    workspaceSize: `${finalWorkspaceWidth}x${finalWorkspaceHeight}`,
+                    paletteSize: matchPalette.length,
+                    edgeProtection: effectiveEdgeProtection,
+                    smoothingLevels: effectiveSmoothingLevels
+                });
+                
                 const outputData = await processWithWebGPU(
                     new Uint8ClampedArray(nativePixelData),
                     nativeWidth,
@@ -345,6 +358,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     effectiveEdgeProtection,
                     effectiveSmoothingLevels
                 );
+
+                console.log('[WebGPU] Output data length:', outputData.length);
+                console.log('[WebGPU] First 20 pixels:', Array.from(outputData.slice(0, 80)));
+                
+                // Check if output is all zeros
+                let hasNonZero = false;
+                for (let i = 0; i < Math.min(1000, outputData.length); i++) {
+                    if (outputData[i] !== 0) {
+                        hasNonZero = true;
+                        break;
+                    }
+                }
+                console.log('[WebGPU] Has non-zero pixels:', hasNonZero);
 
                 // Put processed data back to canvas
                 const imageData = new ImageData(new Uint8ClampedArray(outputData), finalWorkspaceWidth, finalWorkspaceHeight);
