@@ -48,42 +48,9 @@ async function findOptimalQuality(
 }
 
 /**
- * Tries to compress PNG at different compression levels.
- * Returns the best PNG that fits within the target size, or null if none fit.
- */
-async function tryPngCompression(
-    canvas: OffscreenCanvas,
-    targetSize: number
-): Promise<Blob | null> {
-    // Try different PNG compression levels from maximum (9) down to minimum (0)
-    // Higher values = better compression but slower
-    const compressionLevels = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    
-    for (const level of compressionLevels) {
-        try {
-            // Note: OffscreenCanvas convertToBlob doesn't expose compression level directly
-            // But we can try creating the blob and checking the size
-            const pngBlob = await canvas.convertToBlob({ 
-                type: 'image/png',
-                // @ts-ignore - quality parameter may affect PNG compression in some browsers
-                quality: 1.0 - (level * 0.05) // Experimental: map level to quality hint
-            });
-            
-            if (pngBlob.size <= targetSize) {
-                return pngBlob;
-            }
-        } catch (e) {
-            // Continue to next level
-        }
-    }
-    
-    return null;
-}
-
-/**
  * Intelligently compresses an image to fit within the target size limit.
  * For nationstates.net compatibility, tries PNG (preferred), GIF, and JPEG formats.
- * Prioritizes PNG with different compression levels before trying other formats.
+ * Prioritizes PNG for lossless quality, then GIF for flag-style images.
  */
 async function intelligentCompress(
     canvas: OffscreenCanvas,
@@ -96,20 +63,14 @@ async function intelligentCompress(
         return await canvas.convertToBlob({ type: 'image/png' });
     }
     
-    // Try PNG first with default compression - it's lossless, so if it fits, it's the best choice
+    // Try PNG first - it's lossless, so if it fits, it's the best choice for flags
     const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
     
     if (pngBlob.size <= TARGET_SIZE) {
         return pngBlob;
     }
     
-    // PNG with default compression is too large, try different compression levels
-    const compressedPng = await tryPngCompression(canvas, TARGET_SIZE);
-    if (compressedPng) {
-        return compressedPng;
-    }
-    
-    // PNG still too large even with maximum compression, try other formats
+    // PNG is too large, try other formats
     let bestBlob: Blob = pngBlob;
     let bestFormat = 'png';
     
