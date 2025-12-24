@@ -453,6 +453,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         for (let ny = yStart; ny <= yEnd; ny++) {
                             for (let nx = xStart; nx <= xEnd; nx++) {
                                 const nIdx = lowResIdxMap[ny * nativeWidth + nx];
+                                // Bounds check for defensive programming - ensures we don't overflow the counts array
                                 if (nIdx >= 0 && nIdx < MAX_PALETTE_SIZE) {
                                     localCountsArray[nIdx]++;
                                 }
@@ -593,6 +594,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         if (dx > 0 || dy > 0) weight = 0.5;
                         if (dx > 1 || dy > 1) weight = 0.2;
 
+                        // Bounds check for defensive programming - ensures we don't overflow the weights array
                         if (nIdx >= 0 && nIdx < MAX_PALETTE_SIZE) {
                             localWeightsArray[nIdx] += weight;
                         }

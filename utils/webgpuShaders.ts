@@ -30,7 +30,10 @@ struct Color {
 @group(0) @binding(4) var<storage, read_write> outputIndices: array<i32>;
 @group(0) @binding(5) var<uniform> params: Params;
 
-// Note: MAX_PALETTE_SIZE = 256 (defined in processingConstants.ts)
+// IMPORTANT: Keep this value in sync with MAX_PALETTE_SIZE in processingConstants.ts
+// WGSL shaders don't support dynamic constants, so this must be manually updated if MAX_PALETTE_SIZE changes
+const MAX_PALETTE: u32 = 256u;
+
 fn colorDistance(r1: f32, g1: f32, b1: f32, r2: f32, g2: f32, b2: f32) -> f32 {
   let dr = r1 - r2;
   let dg = g1 - g2;
@@ -113,6 +116,9 @@ struct Color {
 @group(0) @binding(3) var<storage, read_write> outputIndices: array<i32>;
 @group(0) @binding(4) var<uniform> params: Params;
 
+// IMPORTANT: Keep this value in sync with MAX_PALETTE_SIZE in processingConstants.ts
+const MAX_PALETTE: u32 = 256u;
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let x = global_id.x;
@@ -131,15 +137,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let xEnd = min(i32(x) + i32(params.radius), i32(params.width) - 1);
   
   // Count occurrences of each palette index in the window
-  var counts = array<u32, 256>();
-  for (var i = 0u; i < 256u; i++) {
+  var counts = array<u32, MAX_PALETTE>();
+  for (var i = 0u; i < MAX_PALETTE; i++) {
     counts[i] = 0u;
   }
   
   for (var ny = yStart; ny <= yEnd; ny++) {
     for (var nx = xStart; nx <= xEnd; nx++) {
       let nIdx = inputIndices[u32(ny) * params.width + u32(nx)];
-      if (nIdx >= 0 && nIdx < 256) {
+      if (nIdx >= 0 && nIdx < i32(MAX_PALETTE)) {
         counts[u32(nIdx)]++;
       }
     }
@@ -254,6 +260,9 @@ struct Color {
 @group(0) @binding(3) var<storage, read_write> outputPixels: array<u32>;
 @group(0) @binding(4) var<uniform> params: Params;
 
+// IMPORTANT: Keep this value in sync with MAX_PALETTE_SIZE in processingConstants.ts
+const MAX_PALETTE: u32 = 256u;
+
 fn blendColors(c1: Color, c2: Color, t: f32) -> vec3<f32> {
   return vec3<f32>(
     c1.r + t * (c2.r - c1.r),
@@ -296,8 +305,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let xMin = max(i32(lx) - 2, 0);
   let xMax = min(i32(lx) + 2, i32(params.nativeWidth) - 1);
   
-  var weights = array<f32, 256>();
-  for (var i = 0u; i < 256u; i++) {
+  var weights = array<f32, MAX_PALETTE>();
+  for (var i = 0u; i < MAX_PALETTE; i++) {
     weights[i] = 0.0;
   }
   
@@ -316,7 +325,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         weight = 0.2;
       }
       
-      if (nIdx >= 0 && nIdx < 256) {
+      if (nIdx >= 0 && nIdx < i32(MAX_PALETTE)) {
         weights[u32(nIdx)] += weight;
       }
     }
