@@ -133,5 +133,5 @@ After applying this fix:
 
 ## See Also
 
-- Commit: `c5ba26d` - "Fix WebGPU data type mismatches causing black pixel output"
-- Branch: `copilot/fix-webgpu-logic-issues-v2`
+- Patch file: `webgpu-data-type-fix.patch` in this PR
+- Detailed verification: `FIX_VERIFICATION.md`
