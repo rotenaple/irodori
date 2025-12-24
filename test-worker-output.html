@@ -1,6 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
+<html lang="en" class=" idc0_343 vxkoxqw"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;</script>
+
+  <script type="module" src="test-worker-output_files/client"></script>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Worker Output Comparison Test</title>
@@ -68,312 +75,74 @@
     <button id="clearResults">Clear Results</button>
   </div>
   
-  <div id="status"></div>
+  <div id="status" class="status error">Test failed! Outputs differ.</div>
   
   <div class="container">
     <div class="result">
       <h3>Test 1: Default (WebGPU if available)</h3>
       <canvas id="canvas1" width="200" height="200"></canvas>
-      <div class="stats" id="stats1"></div>
+      <div class="stats" id="stats1">
+Duration: 2324.00ms
+Size: 1.50 KB
+Dimensions: 200x200
+Total Pixels: 40000
+Non-zero Pixels: 40000 (100.00%)
+Unique Colors: 17
+
+Top Colors:
+  255,0,0: 9801 pixels
+  0,255,0: 9801 pixels
+  0,0,255: 9801 pixels
+  255,255,0: 9801 pixels
+  4,255,0: 100 pixels
+</div>
     </div>
     
     <div class="result">
       <h3>Test 2: Default (Second Run)</h3>
       <canvas id="canvas2" width="200" height="200"></canvas>
-      <div class="stats" id="stats2"></div>
+      <div class="stats" id="stats2">
+Duration: 4866.00ms
+Size: 1.43 KB
+Dimensions: 200x200
+Total Pixels: 40000
+Non-zero Pixels: 40000 (100.00%)
+Unique Colors: 4
+
+Top Colors:
+  0,0,0: 39530 pixels
+  0,0,1: 198 pixels
+  0,0,2: 176 pixels
+  0,0,3: 96 pixels
+</div>
     </div>
   </div>
   
   <div class="result">
     <h3>Comparison Results</h3>
-    <div class="stats" id="comparison"></div>
-  </div>
-
-  <script type="module">
-    // Create a simple test image
-    function createTestImage(width, height) {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      
-      // Create a pattern with distinct colors
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          if (x < width / 2 && y < height / 2) {
-            ctx.fillStyle = '#FF0000'; // Red
-          } else if (x >= width / 2 && y < height / 2) {
-            ctx.fillStyle = '#00FF00'; // Green
-          } else if (x < width / 2 && y >= height / 2) {
-            ctx.fillStyle = '#0000FF'; // Blue
-          } else {
-            ctx.fillStyle = '#FFFF00'; // Yellow
-          }
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-      
-      return canvas;
-    }
-
-    // Create test palette
-    function createTestPalette() {
-      return [
-        { r: 255, g: 0, b: 0, hex: '#ff0000', id: 'red' },
-        { r: 0, g: 255, b: 0, hex: '#00ff00', id: 'green' },
-        { r: 0, g: 0, b: 255, hex: '#0000ff', id: 'blue' },
-        { r: 255, g: 255, b: 0, hex: '#ffff00', id: 'yellow' }
-      ];
-    }
-
-    // Run worker test
-    async function runWorker(forceCpuOnly = false) {
-      const testCanvas = createTestImage(100, 100);
-      const imageBitmap = await createImageBitmap(testCanvas);
-      const palette = createTestPalette();
-      
-      const parameters = {
-        upscaleFactor: 2,
-        denoiseRadius: 0,
-        edgeProtection: 50,
-        disablePostProcessing: false,
-        disableRecoloring: false,
-        disableScaling: false,
-        palette,
-        colorGroups: [],
-        enabledGroups: palette.map(p => p.id),
-        selectedInGroup: {},
-        smoothingLevels: 50,
-        vertexInertia: 100
-      };
-      
-      return new Promise((resolve, reject) => {
-        const worker = new Worker(new URL('./imageProcessor.worker.ts', import.meta.url), { type: 'module' });
-        const startTime = performance.now();
-        
-        // If forcing CPU only, disable WebGPU
-        if (forceCpuOnly) {
-          console.log('Forcing CPU-only path by disabling WebGPU');
-          // This is a hack - we can't easily force CPU from outside
-          // Instead we'll note this in the UI
-        }
-        
-        worker.onmessage = async (e) => {
-          if (e.data.type === 'complete') {
-            const endTime = performance.now();
-            const duration = endTime - startTime;
-            
-            if (e.data.result) {
-              const blob = e.data.result;
-              const img = await createImageBitmap(blob);
-              
-              // Get pixel data
-              const canvas = document.createElement('canvas');
-              canvas.width = img.width;
-              canvas.height = img.height;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0);
-              const imageData = ctx.getImageData(0, 0, img.width, img.height);
-              
-              resolve({
-                blob,
-                imageData,
-                width: img.width,
-                height: img.height,
-                duration,
-                size: blob.size
-              });
-            } else {
-              reject(new Error(e.data.error || 'Unknown error'));
-            }
-            worker.terminate();
-          }
-        };
-        
-        worker.onerror = (error) => {
-          reject(error);
-          worker.terminate();
-        };
-        
-        // Send message with transferable
-        worker.postMessage({
-          type: 'process',
-          imageBitmap,
-          parameters
-        }, [imageBitmap]);
-      });
-    }
-
-    // Compare two ImageData objects
-    function compareImageData(data1, data2) {
-      if (data1.width !== data2.width || data1.height !== data2.height) {
-        return {
-          match: false,
-          error: `Dimensions mismatch: ${data1.width}x${data1.height} vs ${data2.width}x${data2.height}`
-        };
-      }
-      
-      let differences = 0;
-      let maxDiff = 0;
-      const sampleDifferences = [];
-      
-      for (let i = 0; i < data1.data.length; i++) {
-        const diff = Math.abs(data1.data[i] - data2.data[i]);
-        if (diff > 0) {
-          differences++;
-          maxDiff = Math.max(maxDiff, diff);
-          
-          if (sampleDifferences.length < 10) {
-            sampleDifferences.push({
-              index: i,
-              pixel: Math.floor(i / 4),
-              channel: ['R', 'G', 'B', 'A'][i % 4],
-              val1: data1.data[i],
-              val2: data2.data[i],
-              diff
-            });
-          }
-        }
-      }
-      
-      return {
-        match: differences === 0,
-        differences,
-        maxDiff,
-        totalPixels: data1.data.length,
-        percentDifferent: (differences / data1.data.length) * 100,
-        sampleDifferences
-      };
-    }
-
-    // Analyze pixel data
-    function analyzePixelData(imageData) {
-      const data = imageData.data;
-      let nonZeroPixels = 0;
-      let colorCounts = {};
-      
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const a = data[i + 3];
-        
-        if (r !== 0 || g !== 0 || b !== 0 || a !== 0) {
-          nonZeroPixels++;
-        }
-        
-        const key = `${r},${g},${b}`;
-        colorCounts[key] = (colorCounts[key] || 0) + 1;
-      }
-      
-      return {
-        totalPixels: data.length / 4,
-        nonZeroPixels,
-        percentNonZero: (nonZeroPixels / (data.length / 4)) * 100,
-        uniqueColors: Object.keys(colorCounts).length,
-        topColors: Object.entries(colorCounts)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([color, count]) => ({ color, count }))
-      };
-    }
-
-    // Display result
-    async function displayResult(result, canvasId, statsId) {
-      const canvas = document.getElementById(canvasId);
-      const stats = document.getElementById(statsId);
-      
-      // Draw result - create ImageBitmap from blob first
-      const img = await createImageBitmap(result.blob);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      
-      // Display stats
-      const analysis = analyzePixelData(result.imageData);
-      stats.textContent = `
-Duration: ${result.duration.toFixed(2)}ms
-Size: ${(result.size / 1024).toFixed(2)} KB
-Dimensions: ${result.width}x${result.height}
-Total Pixels: ${analysis.totalPixels}
-Non-zero Pixels: ${analysis.nonZeroPixels} (${analysis.percentNonZero.toFixed(2)}%)
-Unique Colors: ${analysis.uniqueColors}
-
-Top Colors:
-${analysis.topColors.map(c => `  ${c.color}: ${c.count} pixels`).join('\n')}
-`;
-    }
-
-    // Set status
-    function setStatus(message, type = 'running') {
-      const statusDiv = document.getElementById('status');
-      statusDiv.className = `status ${type}`;
-      statusDiv.textContent = message;
-    }
-
-    // Run comparison test
-    async function runComparisonTest() {
-      setStatus('Running comparison test...', 'running');
-      document.getElementById('comparison').textContent = 'Running tests...';
-      
-      try {
-        // Run first test
-        setStatus('Running Test 1...', 'running');
-        const result1 = await runWorker(false);
-        await displayResult(result1, 'canvas1', 'stats1');
-        
-        // Run second test
-        setStatus('Running Test 2...', 'running');
-        const result2 = await runWorker(false);
-        await displayResult(result2, 'canvas2', 'stats2');
-        
-        // Compare results
-        const comparison = compareImageData(result1.imageData, result2.imageData);
-        
-        let comparisonText = `
+    <div class="stats" id="comparison">
 Comparison Results:
 ===================
-Match: ${comparison.match ? 'YES ✓' : 'NO ✗'}
-`;
-        
-        if (!comparison.match) {
-          comparisonText += `
-Differences: ${comparison.differences} / ${comparison.totalPixels} (${comparison.percentDifferent.toFixed(4)}%)
-Max Difference: ${comparison.maxDiff}
+Match: NO ✗
+
+Differences: 51263 / 160000 (32.0394%)
+Max Difference: 255
 
 Sample Differences:
-${comparison.sampleDifferences.map(d => 
-  `  Pixel ${d.pixel} ${d.channel}: ${d.val1} vs ${d.val2} (diff: ${d.diff})`
-).join('\n')}
-`;
-        }
-        
-        document.getElementById('comparison').textContent = comparisonText;
-        setStatus(comparison.match ? 'Test passed! Outputs match.' : 'Test failed! Outputs differ.', 
-                 comparison.match ? 'success' : 'error');
-        
-      } catch (error) {
-        setStatus(`Test failed: ${error.message}`, 'error');
-        document.getElementById('comparison').textContent = `Error: ${error.message}\n${error.stack}`;
-      }
-    }
+  Pixel 0 R: 255 vs 0 (diff: 255)
+  Pixel 1 R: 255 vs 0 (diff: 255)
+  Pixel 2 R: 255 vs 0 (diff: 255)
+  Pixel 3 R: 255 vs 0 (diff: 255)
+  Pixel 4 R: 255 vs 0 (diff: 255)
+  Pixel 5 R: 255 vs 0 (diff: 255)
+  Pixel 6 R: 255 vs 0 (diff: 255)
+  Pixel 7 R: 255 vs 0 (diff: 255)
+  Pixel 8 R: 255 vs 0 (diff: 255)
+  Pixel 9 R: 255 vs 0 (diff: 255)
+</div>
+  </div>
 
-    // Event listeners
-    document.getElementById('runTest').addEventListener('click', runComparisonTest);
-    document.getElementById('testCpuOnly').addEventListener('click', async () => {
-      alert('Note: Cannot easily force CPU-only mode from this test. Check browser console for WebGPU availability messages.');
-      await runComparisonTest();
-    });
-    document.getElementById('clearResults').addEventListener('click', () => {
-      ['canvas1', 'canvas2'].forEach(id => {
-        const canvas = document.getElementById(id);
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      });
-      ['stats1', 'stats2', 'comparison'].forEach(id => {
-        document.getElementById(id).textContent = '';
-      });
-      setStatus('', '');
-    });
-  </script>
-</body>
-</html>
+  <script type="module" src="test-worker-output_files/test-worker-output.html"></script>
+
+
+</body></html>
