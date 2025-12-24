@@ -139,7 +139,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <button onClick={() => setUpscaleFactor('NS')} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === 'NS' ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>Auto</button>
           </div>
           {isSvg && activeInfo === 'scale' && <InfoBox><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Scaling is disabled; SVGs maintain infinite resolution.</InfoBox>}
-          {!isSvg && activeInfo === 'scale' && <InfoBox>Resizes to NationStates dimensions (535x355px or 568x321px).</InfoBox>}
+          {!isSvg && activeInfo === 'scale' && <InfoBox>Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb.</InfoBox>}
         </div>
 
         <div className="space-y-2 pt-2 border-t border-[#333]/10">
