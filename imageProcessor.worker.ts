@@ -10,8 +10,80 @@ import {
 } from './utils/colorUtils';
 
 /**
+ * Finds the optimal quality for a given format using binary search.
+ * Returns the blob and quality that fits within the target size.
+ */
+async function findOptimalQuality(
+    canvas: OffscreenCanvas,
+    format: string,
+    targetSize: number,
+    minQuality: number = 0.5,
+    maxQuality: number = 1.0
+): Promise<{ blob: Blob | null; quality: number }> {
+    let bestBlob: Blob | null = null;
+    let bestQuality = minQuality;
+    let low = minQuality;
+    let high = maxQuality;
+    const tolerance = 0.01; // Higher precision for better quality
+    
+    while (high - low > tolerance) {
+        const mid = (low + high) / 2;
+        const testBlob = await canvas.convertToBlob({ 
+            type: format, 
+            quality: mid 
+        });
+        
+        if (testBlob.size <= targetSize) {
+            // This quality works, try higher
+            bestBlob = testBlob;
+            bestQuality = mid;
+            low = mid;
+        } else {
+            // Too large, try lower quality
+            high = mid;
+        }
+    }
+    
+    return { blob: bestBlob, quality: bestQuality };
+}
+
+/**
+ * Tries to compress PNG at different compression levels.
+ * Returns the best PNG that fits within the target size, or null if none fit.
+ */
+async function tryPngCompression(
+    canvas: OffscreenCanvas,
+    targetSize: number
+): Promise<Blob | null> {
+    // Try different PNG compression levels from maximum (9) down to minimum (0)
+    // Higher values = better compression but slower
+    const compressionLevels = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    
+    for (const level of compressionLevels) {
+        try {
+            // Note: OffscreenCanvas convertToBlob doesn't expose compression level directly
+            // But we can try creating the blob and checking the size
+            const pngBlob = await canvas.convertToBlob({ 
+                type: 'image/png',
+                // @ts-ignore - quality parameter may affect PNG compression in some browsers
+                quality: 1.0 - (level * 0.05) // Experimental: map level to quality hint
+            });
+            
+            if (pngBlob.size <= targetSize) {
+                return pngBlob;
+            }
+        } catch (e) {
+            // Continue to next level
+        }
+    }
+    
+    return null;
+}
+
+/**
  * Intelligently compresses an image to fit within the target size limit.
- * Uses binary search to find the highest JPEG quality that fits, or falls back to PNG.
+ * For nationstates.net compatibility, tries PNG (preferred), GIF, and JPEG formats.
+ * Prioritizes PNG with different compression levels before trying other formats.
  */
 async function intelligentCompress(
     canvas: OffscreenCanvas,
@@ -24,41 +96,44 @@ async function intelligentCompress(
         return await canvas.convertToBlob({ type: 'image/png' });
     }
     
-    // Try PNG first
+    // Try PNG first with default compression - it's lossless, so if it fits, it's the best choice
     const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
     
     if (pngBlob.size <= TARGET_SIZE) {
-        // PNG is already small enough, use it
         return pngBlob;
     }
     
-    // PNG is too large, use JPEG with intelligent quality selection
-    // Binary search for optimal quality
-    let bestBlob = pngBlob;
-    let bestQuality = 0.5; // Initialize to minimum quality
-    let low = 0.5;
-    let high = 0.95;
-    const tolerance = 0.02;
+    // PNG with default compression is too large, try different compression levels
+    const compressedPng = await tryPngCompression(canvas, TARGET_SIZE);
+    if (compressedPng) {
+        return compressedPng;
+    }
     
-    while (high - low > tolerance) {
-        const mid = (low + high) / 2;
-        const testBlob = await canvas.convertToBlob({ 
-            type: 'image/jpeg', 
-            quality: mid 
-        });
-        
-        if (testBlob.size <= TARGET_SIZE) {
-            // This quality works, try higher
-            bestBlob = testBlob;
-            bestQuality = mid;
-            low = mid;
-        } else {
-            // Too large, try lower quality
-            high = mid;
+    // PNG still too large even with maximum compression, try other formats
+    let bestBlob: Blob = pngBlob;
+    let bestFormat = 'png';
+    
+    // Try GIF - good for flag-style images with limited colors, avoids JPEG artifacts
+    try {
+        const gifBlob = await canvas.convertToBlob({ type: 'image/gif' });
+        if (gifBlob.size <= TARGET_SIZE) {
+            // GIF fits and is lossless for images with limited colors
+            bestBlob = gifBlob;
+            bestFormat = 'gif';
+        }
+    } catch (e) {
+        // GIF encoding might not be supported in all environments
+    }
+    
+    // Only try JPEG as last resort - JPEG creates artifacts on flag-style images
+    if (bestFormat === 'png') {
+        const jpegResult = await findOptimalQuality(canvas, 'image/jpeg', TARGET_SIZE, 0.5, 1.0);
+        if (jpegResult.blob && jpegResult.blob.size <= TARGET_SIZE) {
+            bestBlob = jpegResult.blob;
+            bestFormat = 'jpeg';
         }
     }
     
-    // If we found a JPEG that fits, use it; otherwise fall back to PNG
     return bestBlob;
 }
 

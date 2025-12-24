@@ -376,6 +376,8 @@ const App: React.FC = () => {
         link.download = `${baseName}-irodori.svg`;
       } else if (processedBlob.type === 'image/jpeg') {
         link.download = `${baseName}-irodori.jpg`;
+      } else if (processedBlob.type === 'image/gif') {
+        link.download = `${baseName}-irodori.gif`;
       } else {
         link.download = `${baseName}-irodori.png`;
       }
