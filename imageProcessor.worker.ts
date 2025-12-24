@@ -8,6 +8,10 @@ import {
     applyMedianFilter,
     getColorDistance
 } from './utils/colorUtils';
+import { createWebGPUProcessor, WebGPUProcessor } from './utils/webgpuProcessor';
+
+// Global WebGPU processor instance (initialized lazily)
+let webgpuProcessor: WebGPUProcessor | null | undefined = undefined;
 
 /**
  * Finds the optimal quality for a given format using binary search.
@@ -98,6 +102,95 @@ async function intelligentCompress(
     return bestBlob;
 }
 
+/**
+ * Initialize WebGPU processor (lazy initialization)
+ */
+async function initWebGPU(): Promise<boolean> {
+    if (webgpuProcessor === undefined) {
+        try {
+            webgpuProcessor = await createWebGPUProcessor();
+            if (webgpuProcessor) {
+                console.log('WebGPU processor initialized successfully');
+                return true;
+            } else {
+                console.log('WebGPU not available, using CPU fallback');
+                return false;
+            }
+        } catch (error) {
+            console.warn('Failed to initialize WebGPU:', error);
+            webgpuProcessor = null;
+            return false;
+        }
+    }
+    return webgpuProcessor !== null;
+}
+
+/**
+ * Process using WebGPU acceleration
+ */
+async function processWithWebGPU(
+    nativePixelData: Uint8ClampedArray,
+    nativeWidth: number,
+    nativeHeight: number,
+    workspaceWidth: number,
+    workspaceHeight: number,
+    matchPalette: PaletteColor[],
+    colorToGroupIdx: Map<string, number>,
+    highResPixelData: Uint8ClampedArray,
+    edgeProtection: number,
+    smoothingLevels: number
+): Promise<Uint8ClampedArray> {
+    if (!webgpuProcessor) {
+        throw new Error('WebGPU processor not available');
+    }
+
+    // Phase 1: Palette matching
+    const lowResIdxMap = await webgpuProcessor.paletteMatching(
+        nativePixelData,
+        nativeWidth,
+        nativeHeight,
+        matchPalette,
+        colorToGroupIdx
+    );
+
+    // Phase 2: Edge protection
+    let processedIndices = lowResIdxMap;
+    if (edgeProtection > 0) {
+        let radius = Math.max(1, Math.round((edgeProtection / 100) * 3));
+        let iterations = Math.max(1, Math.round((edgeProtection / 100) * 4));
+        if (edgeProtection > 66) { radius = 3; iterations = 3; }
+        if (edgeProtection > 85) { radius = 5; iterations = 5; }
+
+        processedIndices = await webgpuProcessor.edgeProtection(
+            lowResIdxMap,
+            nativePixelData,
+            nativeWidth,
+            nativeHeight,
+            matchPalette,
+            radius,
+            iterations
+        );
+    }
+
+    // Phase 3: High-resolution reconstruction
+    const outputData = await webgpuProcessor.reconstruction(
+        processedIndices,
+        highResPixelData,
+        {
+            nativeWidth,
+            nativeHeight,
+            workspaceWidth,
+            workspaceHeight,
+            palette: matchPalette,
+            colorToGroupIdx,
+            edgeProtection,
+            smoothingLevels
+        }
+    );
+
+    return outputData;
+}
+
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     if (e.data.type !== 'process') return;
 
@@ -173,8 +266,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         // --- PHASE 1: LOW-RES SOLVE (Original Resolution) ---
         const nativePixelData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight).data;
-        let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
-
+        
         // 1. Setup Maps for Fast Lookup
         // We use a map to link specific hex codes directly to a palette index.
         // This ensures the user's manual groupings override mathematical distance.
@@ -207,31 +299,121 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             }
         });
 
-        // 4. Pixel Loop
-        for (let i = 0; i < nativePixelData.length; i += 4) {
+        // Determine effective parameters
+        const effectiveEdgeProtection = disablePostProcessing ? 0 : edgeProtection;
+        const effectiveSmoothingLevels = disablePostProcessing ? 0 : smoothingLevels;
+
+        // --- TRY WEBGPU ACCELERATION FIRST ---
+        let useWebGPU = false;
+        let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
+        
+        try {
+            const webgpuAvailable = await initWebGPU();
+            if (webgpuAvailable && webgpuProcessor) {
+                // Prepare workspace for WebGPU
+                const workspaceScale = targetUpscale * 4;
+                const workspaceWidth = Math.round(nativeWidth * workspaceScale);
+                const workspaceHeight = Math.round(nativeHeight * workspaceScale);
+
+                const MAX_PIXELS = 10000000;
+                const currentPixels = workspaceWidth * workspaceHeight;
+                const safeScale = currentPixels > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (nativeWidth * nativeHeight)) : workspaceScale;
+
+                const finalWorkspaceWidth = Math.round(nativeWidth * safeScale);
+                const finalWorkspaceHeight = Math.round(nativeHeight * safeScale);
+
+                const workspaceCanvas = new OffscreenCanvas(finalWorkspaceWidth, finalWorkspaceHeight);
+                const wCtx = workspaceCanvas.getContext('2d', { willReadFrequently: true });
+                if (!wCtx) throw new Error("Could not get workspace context");
+
+                wCtx.imageSmoothingEnabled = true;
+                wCtx.imageSmoothingQuality = 'high';
+                wCtx.drawImage(nativeCanvas, 0, 0, finalWorkspaceWidth, finalWorkspaceHeight);
+
+                const highResPixelData = wCtx.getImageData(0, 0, finalWorkspaceWidth, finalWorkspaceHeight).data;
+
+                // Process with WebGPU
+                const outputData = await processWithWebGPU(
+                    new Uint8ClampedArray(nativePixelData),
+                    nativeWidth,
+                    nativeHeight,
+                    finalWorkspaceWidth,
+                    finalWorkspaceHeight,
+                    matchPalette,
+                    colorToGroupIdx,
+                    new Uint8ClampedArray(highResPixelData),
+                    effectiveEdgeProtection,
+                    effectiveSmoothingLevels
+                );
+
+                // Put processed data back to canvas
+                wCtx.putImageData(new ImageData(outputData, finalWorkspaceWidth, finalWorkspaceHeight), 0, 0);
+
+                const finalCanvas = new OffscreenCanvas(Math.round(nativeWidth * targetUpscale), Math.round(nativeHeight * targetUpscale));
+                const fCtx = finalCanvas.getContext('2d');
+                if (!fCtx) throw new Error("Could not get final context");
+
+                fCtx.fillStyle = '#000000';
+                fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+                fCtx.imageSmoothingEnabled = true;
+                fCtx.imageSmoothingQuality = 'high';
+                fCtx.drawImage(workspaceCanvas, 0, 0, finalCanvas.width, finalCanvas.height);
+
+                const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
+                self.postMessage({ type: 'complete', result: blob });
+                
+                useWebGPU = true;
+                return;
+            }
+        } catch (webgpuError) {
+            console.warn('WebGPU processing failed, falling back to CPU:', webgpuError);
+            useWebGPU = false;
+        }
+
+        // --- CPU FALLBACK: Continue with original CPU implementation ---
+        if (!useWebGPU) {
+            // 4. Pixel Loop (CPU implementation) - Optimized
+            // Pre-compute palette lookup for direct distance comparison
+            const paletteRGB = new Float32Array(matchPalette.length * 3);
+            for (let i = 0; i < matchPalette.length; i++) {
+                paletteRGB[i * 3] = matchPalette[i].r;
+                paletteRGB[i * 3 + 1] = matchPalette[i].g;
+                paletteRGB[i * 3 + 2] = matchPalette[i].b;
+            }
+            
+            for (let i = 0; i < nativePixelData.length; i += 4) {
             const r = nativePixelData[i];
             const g = nativePixelData[i + 1];
             const b = nativePixelData[i + 2];
-            const hex = rgbToHex(r, g, b); // Ensure this util returns compatible hex (e.g. lowercase)
-
+            
             // Step A: Check if this specific color is explicitly grouped
-            let pIdx = colorToGroupIdx.get(hex);
+            // Only compute hex if we have color groups
+            let pIdx: number | undefined;
+            if (colorToGroupIdx.size > 0) {
+                const hex = rgbToHex(r, g, b);
+                pIdx = colorToGroupIdx.get(hex);
+            }
 
-            // Step B: If not in a group, fall back to Nearest Neighbor logic
+            // Step B: If not in a group, fall back to optimized distance calculation
             if (pIdx === undefined) {
-                const pixel = { r, g, b };
-                const closest = findClosestColor(pixel, matchPalette);
-                // We find the index of the closest match
-                const foundIdx = paletteIdMap.get(closest.id);
-                pIdx = foundIdx !== undefined ? foundIdx : 0;
+                // Inline distance calculation for better performance
+                let minDistSq = Infinity;
+                pIdx = 0;
+                for (let j = 0; j < matchPalette.length; j++) {
+                    const idx3 = j * 3;
+                    const dr = r - paletteRGB[idx3];
+                    const dg = g - paletteRGB[idx3 + 1];
+                    const db = b - paletteRGB[idx3 + 2];
+                    const distSq = dr * dr + dg * dg + db * db;
+                    if (distSq < minDistSq) {
+                        minDistSq = distSq;
+                        pIdx = j;
+                    }
+                }
             }
 
             lowResIdxMap[i / 4] = pIdx;
         }
-
-        // Determine effective parameters
-        const effectiveEdgeProtection = disablePostProcessing ? 0 : edgeProtection;
-        const effectiveSmoothingLevels = disablePostProcessing ? 0 : smoothingLevels;
 
         // --- PHASE 2: LOW-RES BLEED GUARD (Edge Protection at 1x) ---
         if (effectiveEdgeProtection > 0) {
@@ -244,6 +426,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
             const tempIdxMap = new Int16Array(lowResIdxMap.length);
             const paletteSize = matchPalette.length;
+            
+            // Optimize: Pre-allocate array for counting instead of Map
+            const maxCounts = 256;
+            const localCountsArray = new Uint16Array(maxCounts);
 
             for (let iter = 0; iter < iterations; iter++) {
                 for (let y = 0; y < nativeHeight; y++) {
@@ -257,37 +443,64 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         const idx = y * nativeWidth + x;
                         const currentIdx = lowResIdxMap[idx];
                         const sIdx = idx * 4;
-                        const src = { r: nativePixelData[sIdx], g: nativePixelData[sIdx + 1], b: nativePixelData[sIdx + 2] };
+                        const srcR = nativePixelData[sIdx];
+                        const srcG = nativePixelData[sIdx + 1];
+                        const srcB = nativePixelData[sIdx + 2];
 
-                        const localCounts = new Map<number, number>();
+                        // Reset counts array
+                        localCountsArray.fill(0);
+                        
                         for (let ny = yStart; ny <= yEnd; ny++) {
                             for (let nx = xStart; nx <= xEnd; nx++) {
                                 const nIdx = lowResIdxMap[ny * nativeWidth + nx];
-                                localCounts.set(nIdx, (localCounts.get(nIdx) || 0) + 1);
+                                if (nIdx >= 0 && nIdx < maxCounts) {
+                                    localCountsArray[nIdx]++;
+                                }
                             }
                         }
 
-                        // 2. Identify candidates
-                        const sorted = Array.from(localCounts.entries())
-                            .sort((a, b) => b[1] - a[1]);
+                        // 2. Identify candidates - find top 3 most common
+                        let major1Idx = 0, major1Count = 0;
+                        let major2Idx = 0, major2Count = 0;
+                        let m3 = 0, m3Count = 0;
+                        
+                        for (let i = 0; i < paletteSize; i++) {
+                            const count = localCountsArray[i];
+                            if (count > major1Count) {
+                                m3 = major2Idx;
+                                m3Count = major2Count;
+                                major2Idx = major1Idx;
+                                major2Count = major1Count;
+                                major1Idx = i;
+                                major1Count = count;
+                            } else if (count > major2Count) {
+                                m3 = major2Idx;
+                                m3Count = major2Count;
+                                major2Idx = i;
+                                major2Count = count;
+                            } else if (count > m3Count) {
+                                m3 = i;
+                                m3Count = count;
+                            }
+                        }
 
-                        let major1Idx = sorted[0][0];
-                        let major2Idx = sorted.length > 1 ? sorted[1][0] : major1Idx;
-                        let m3 = sorted.length > 2 ? sorted[2][0] : major2Idx;
-
-                        // BETWEENNESS FILTER:
+                        // BETWEENNESS FILTER (optimized - use squared distances):
                         if (major1Idx !== major2Idx && major2Idx !== m3) {
                             const p1 = matchPalette[major1Idx], p2 = matchPalette[major2Idx], p3 = matchPalette[m3];
-                            const d13 = Math.sqrt((p1.r - p3.r) ** 2 + (p1.g - p3.g) ** 2 + (p1.b - p3.b) ** 2);
-                            const d12 = Math.sqrt((p1.r - p2.r) ** 2 + (p1.g - p2.g) ** 2 + (p1.b - p2.b) ** 2);
-                            const d23 = Math.sqrt((p3.r - p2.r) ** 2 + (p3.g - p2.g) ** 2 + (p3.b - p2.b) ** 2);
-                            if (d12 + d23 < d13 * 1.10) { major2Idx = m3; }
+                            // Use squared distances to avoid sqrt
+                            const d13Sq = (p1.r - p3.r) ** 2 + (p1.g - p3.g) ** 2 + (p1.b - p3.b) ** 2;
+                            const d12Sq = (p1.r - p2.r) ** 2 + (p1.g - p2.g) ** 2 + (p1.b - p2.b) ** 2;
+                            const d23Sq = (p3.r - p2.r) ** 2 + (p3.g - p2.g) ** 2 + (p3.b - p2.b) ** 2;
+                            // sqrt(a) + sqrt(b) < sqrt(c) * 1.1 => check with squared values
+                            const sumSq = (Math.sqrt(d12Sq) + Math.sqrt(d23Sq)) ** 2;
+                            const targetSq = (Math.sqrt(d13Sq) * 1.10) ** 2;
+                            if (sumSq < targetSq) { major2Idx = m3; }
                         }
 
                         // REPRESENTATION FILTER (SAFE 10%):
                         // Only "melt" if the shape is truly tiny/isolated noise.
                         const totalWindow = (yEnd - yStart + 1) * (xEnd - xStart + 1);
-                        const m2Count = localCounts.get(major2Idx) || 0;
+                        const m2Count = localCountsArray[major2Idx];
                         if (m2Count < totalWindow * 0.10) { major2Idx = major1Idx; }
 
                         // 3. Topology cleaning:
@@ -301,11 +514,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             continue;
                         }
 
-                        // 4. Resolve between majors - Source Similarity Multiplier
+                        // 4. Resolve between majors - Source Similarity Multiplier (optimized)
                         const p1 = matchPalette[major1Idx];
                         const p2 = matchPalette[major2Idx];
-                        let err1 = (src.r - p1.r) ** 2 + (src.g - p1.g) ** 2 + (src.b - p1.b) ** 2;
-                        let err2 = (src.r - p2.r) ** 2 + (src.g - p2.g) ** 2 + (src.b - p2.b) ** 2;
+                        let err1 = (srcR - p1.r) ** 2 + (srcG - p1.g) ** 2 + (srcB - p1.b) ** 2;
+                        let err2 = (srcR - p2.r) ** 2 + (srcG - p2.g) ** 2 + (srcB - p2.b) ** 2;
 
                         const stiffness = 1.0 - (vertexInertia / 100) * 0.8;
                         if (currentIdx === major1Idx) err1 *= stiffness;
@@ -343,23 +556,23 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         const scaleX = finalWorkspaceWidth / nativeWidth;
         const scaleY = finalWorkspaceHeight / nativeHeight;
+        
+        // Optimize: Pre-allocate arrays for local weights
+        const maxPaletteSize = 256;
+        const localWeightsArray = new Float32Array(maxPaletteSize);
 
         for (let y = 0; y < finalWorkspaceHeight; y++) {
             // Pre-calculate Y neighbors
             const ly = Math.min(nativeHeight - 1, Math.floor(y / scaleY));
-            const yMin = Math.max(0, ly - 1);
-            const yMax = Math.min(nativeHeight - 1, ly + 1);
 
             for (let x = 0; x < finalWorkspaceWidth; x++) {
                 const lx = Math.min(nativeWidth - 1, Math.floor(x / scaleX));
                 const idx = y * finalWorkspaceWidth + x;
                 const outIdx = idx * 4;
 
-                const currentRefColor = {
-                    r: highResPixelData[outIdx],
-                    g: highResPixelData[outIdx + 1],
-                    b: highResPixelData[outIdx + 2]
-                };
+                const refR = highResPixelData[outIdx];
+                const refG = highResPixelData[outIdx + 1];
+                const refB = highResPixelData[outIdx + 2];
 
                 // 1. Regularize the local candidates list (Expand to 5x5)
                 const yMin = Math.max(0, ly - 2);
@@ -367,7 +580,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const xMin = Math.max(0, lx - 2);
                 const xMax = Math.min(nativeWidth - 1, lx + 2);
 
-                let localWeights = new Map<number, number>();
+                // Reset weights array
+                localWeightsArray.fill(0);
+                
                 for (let ny = yMin; ny <= yMax; ny++) {
                     const dy = Math.abs(ny - ly);
                     for (let nx = xMin; nx <= xMax; nx++) {
@@ -380,11 +595,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         if (dx > 0 || dy > 0) weight = 0.5;
                         if (dx > 1 || dy > 1) weight = 0.2;
 
-                        localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + weight);
+                        if (nIdx >= 0 && nIdx < maxPaletteSize) {
+                            localWeightsArray[nIdx] += weight;
+                        }
                     }
                 }
-                // 1. Identify all unique candidates in the 1x neighborhood
-                const uniqueCandidates = Array.from(localWeights.keys());
+                
+                // Identify unique candidates
+                const uniqueCandidates: number[] = [];
+                for (let i = 0; i < matchPalette.length; i++) {
+                    if (localWeightsArray[i] > 0) {
+                        uniqueCandidates.push(i);
+                    }
+                }
 
                 // 2. STRUCTURAL FILTER (ARTIFACT REJECTION):
                 // If a color in the neighborhood is mathematically a "Between" color 
@@ -392,14 +615,15 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 // We reject it from being a blend partner.
                 const structuralCandidates = uniqueCandidates.filter(cIdx => {
                     const pC = matchPalette[cIdx];
-                    const weightC = localWeights.get(cIdx) || 0;
+                    const weightC = localWeightsArray[cIdx];
 
                     for (const aIdx of uniqueCandidates) {
                         for (const bIdx of uniqueCandidates) {
                             if (aIdx === cIdx || bIdx === cIdx || aIdx === bIdx) continue;
 
                             const pA = matchPalette[aIdx], pB = matchPalette[bIdx];
-                            const weightA = localWeights.get(aIdx) || 0, weightB = localWeights.get(bIdx) || 0;
+                            const weightA = localWeightsArray[aIdx];
+                            const weightB = localWeightsArray[bIdx];
 
                             const dAB = Math.sqrt((pA.r - pB.r) ** 2 + (pA.g - pB.g) ** 2 + (pA.b - pB.b) ** 2);
                             const dAC = Math.sqrt((pA.r - pC.r) ** 2 + (pA.g - pC.g) ** 2 + (pA.b - pC.b) ** 2);
@@ -429,8 +653,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                 const scoredStructural = structuralCandidates.map(cIdx => {
                     const p = matchPalette[cIdx];
-                    const weight = localWeights.get(cIdx) || 0;
-                    const err = (currentRefColor.r - p.r) ** 2 + (currentRefColor.g - p.g) ** 2 + (currentRefColor.b - p.b) ** 2;
+                    const weight = localWeightsArray[cIdx];
+                    const err = (refR - p.r) ** 2 + (refG - p.g) ** 2 + (refB - p.b) ** 2;
 
                     // ADJACENCY GATING: Hard penalty for non-touching colors.
                     const gatingPenalty = adjWhitelist.has(cIdx) ? 0 : -1000;
@@ -462,7 +686,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
                 // Disallow smoothing if the second shape weight is truly trace
-                const weightB = localWeights.get(blendB) || 0;
+                const weightB = localWeightsArray[blendB];
                 if (weightB < 0.3) {
                     blendB = blendA;
                 }
@@ -591,6 +815,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
         self.postMessage({ type: 'complete', result: blob });
+        } // End of CPU fallback block
 
     } catch (error: any) {
         self.postMessage({ type: 'complete', error: error.message });
