@@ -287,8 +287,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         const srcG = nativePixelData[sIdx + 1];
                         const srcB = nativePixelData[sIdx + 2];
 
-                        // Count local palette indices
-                        const localCounts = new Uint16Array(paletteSize);
+                        // Count local palette indices (use Uint32Array to prevent overflow)
+                        const localCounts = new Uint32Array(paletteSize);
                         for (let ny = yStart; ny <= yEnd; ny++) {
                             const nyOffset = ny * nativeWidth;
                             for (let nx = xStart; nx <= xEnd; nx++) {
@@ -410,6 +410,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 paletteTargetB[i] = paletteB[i];
             }
         }
+        
+        // Pre-allocate reusable arrays for pixel loop to reduce allocations
+        const reuseLocalWeights = new Float32Array(paletteSize);
+        const reuseAdjWhitelist = new Uint8Array(paletteSize);
+        const reuseScores = new Float32Array(paletteSize);
 
         for (let y = 0; y < finalWorkspaceHeight; y++) {
             // Pre-calculate Y neighbors
@@ -431,8 +436,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const xMin = Math.max(0, lx - 2);
                 const xMax = Math.min(nativeWidth - 1, lx + 2);
 
-                // Use typed array instead of Map for local weights
-                const localWeights = new Float32Array(paletteSize);
+                // Reuse typed array instead of allocating new one - clear it first
+                reuseLocalWeights.fill(0);
                 for (let ny = yMin; ny <= yMax; ny++) {
                     const dy = Math.abs(ny - ly);
                     const nyOffset = ny * nativeWidth;
@@ -446,14 +451,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         if (dx > 0 || dy > 0) weight = 0.5;
                         if (dx > 1 || dy > 1) weight = 0.2;
 
-                        localWeights[nIdx] += weight;
+                        reuseLocalWeights[nIdx] += weight;
                     }
                 }
                 
                 // 1. Identify all unique candidates in the neighborhood
                 const uniqueCandidates: number[] = [];
                 for (let i = 0; i < paletteSize; i++) {
-                    if (localWeights[i] > 0) uniqueCandidates.push(i);
+                    if (reuseLocalWeights[i] > 0) uniqueCandidates.push(i);
                 }
 
                 // 2. STRUCTURAL FILTER (ARTIFACT REJECTION):
@@ -463,10 +468,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const structuralCandidates: number[] = [];
                 const ucLen = uniqueCandidates.length;
                 
-                outer: for (let ci = 0; ci < ucLen; ci++) {
+                candidateLoop: for (let ci = 0; ci < ucLen; ci++) {
                     const cIdx = uniqueCandidates[ci];
-                    const pCr = paletteR[cIdx], pCg = paletteG[cIdx], pCb = paletteB[cIdx];
-                    const weightC = localWeights[cIdx];
+                    const pCr = paletteR[cIdx];
+                    const pCg = paletteG[cIdx];
+                    const pCb = paletteB[cIdx];
+                    const weightC = reuseLocalWeights[cIdx];
 
                     for (let ai = 0; ai < ucLen; ai++) {
                         const aIdx = uniqueCandidates[ai];
@@ -476,9 +483,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             const bIdx = uniqueCandidates[bi];
                             if (bIdx === cIdx || aIdx === bIdx) continue;
 
-                            const pAr = paletteR[aIdx], pAg = paletteG[aIdx], pAb = paletteB[aIdx];
-                            const pBr = paletteR[bIdx], pBg = paletteG[bIdx], pBb = paletteB[bIdx];
-                            const weightA = localWeights[aIdx], weightB = localWeights[bIdx];
+                            const pAr = paletteR[aIdx];
+                            const pAg = paletteG[aIdx];
+                            const pAb = paletteB[aIdx];
+                            const pBr = paletteR[bIdx];
+                            const pBg = paletteG[bIdx];
+                            const pBb = paletteB[bIdx];
+                            const weightA = reuseLocalWeights[aIdx];
+                            const weightB = reuseLocalWeights[bIdx];
 
                             const dAB = Math.sqrt((pAr - pBr) ** 2 + (pAg - pBg) ** 2 + (pAb - pBb) ** 2);
                             const dAC = Math.sqrt((pAr - pCr) ** 2 + (pAg - pCg) ** 2 + (pAb - pCb) ** 2);
@@ -488,7 +500,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             // Increased tolerance to 1.10 to catch JPG noise.
                             if (dAC + dBC < dAB * 1.10 && dAB > 10) {
                                 if (weightA > weightC && weightB > weightC) {
-                                    continue outer; // Transitional artifact detected
+                                    continue candidateLoop; // Transitional artifact detected
                                 }
                             }
                         }
@@ -497,35 +509,40 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
                 // 3. Identify the STRUCTURAL MAJORS (with Adjacency Gating)
                 // Any color not in the immediate 3x3 is hit with a massive penalty.
-                const adjWhitelist = new Uint8Array(paletteSize); // 1 if adjacent, 0 otherwise
-                const y3Min = Math.max(0, ly - 1), y3Max = Math.min(nativeHeight - 1, ly + 1);
-                const x3Min = Math.max(0, lx - 1), x3Max = Math.min(nativeWidth - 1, lx + 1);
+                reuseAdjWhitelist.fill(0); // Clear from previous iteration
+                const y3Min = Math.max(0, ly - 1);
+                const y3Max = Math.min(nativeHeight - 1, ly + 1);
+                const x3Min = Math.max(0, lx - 1);
+                const x3Max = Math.min(nativeWidth - 1, lx + 1);
                 for (let ny = y3Min; ny <= y3Max; ny++) {
                     const nyOffset = ny * nativeWidth;
                     for (let nx = x3Min; nx <= x3Max; nx++) {
-                        adjWhitelist[lowResIdxMap[nyOffset + nx]] = 1;
+                        reuseAdjWhitelist[lowResIdxMap[nyOffset + nx]] = 1;
                     }
                 }
 
-                // Score structural candidates
+                // Score structural candidates - reuse array
                 const scLen = structuralCandidates.length;
-                const scores = new Float32Array(scLen);
                 let maxScore = -Infinity;
                 let maxIdx = 0;
                 
                 for (let i = 0; i < scLen; i++) {
                     const cIdx = structuralCandidates[i];
-                    const pR = paletteR[cIdx], pG = paletteG[cIdx], pB = paletteB[cIdx];
-                    const weight = localWeights[cIdx];
-                    const dr = refR - pR, dg = refG - pG, db = refB - pB;
+                    const pR = paletteR[cIdx];
+                    const pG = paletteG[cIdx];
+                    const pB = paletteB[cIdx];
+                    const weight = reuseLocalWeights[cIdx];
+                    const dr = refR - pR;
+                    const dg = refG - pG;
+                    const db = refB - pB;
                     const err = dr * dr + dg * dg + db * db;
 
                     // ADJACENCY GATING: Hard penalty for non-touching colors.
-                    const gatingPenalty = adjWhitelist[cIdx] ? 0 : -1000;
+                    const gatingPenalty = reuseAdjWhitelist[cIdx] ? 0 : -1000;
 
                     // Score = Mass weight + Adjacency Gate + Error penalty
                     const score = (weight * 10) + gatingPenalty - Math.sqrt(err);
-                    scores[i] = score;
+                    reuseScores[i] = score;
                     if (score > maxScore) {
                         maxScore = score;
                         maxIdx = i;
@@ -538,8 +555,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 let secondMaxScore = -Infinity;
                 
                 for (let i = 0; i < scLen; i++) {
-                    if (i !== maxIdx && scores[i] > secondMaxScore) {
-                        secondMaxScore = scores[i];
+                    if (i !== maxIdx && reuseScores[i] > secondMaxScore) {
+                        secondMaxScore = reuseScores[i];
                         major2Idx = structuralCandidates[i];
                     }
                 }
@@ -573,7 +590,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
                 // Disallow smoothing if the second shape weight is truly trace
-                const weightB = localWeights[blendB];
+                const weightB = reuseLocalWeights[blendB];
                 if (weightB < 0.3) {
                     blendB = blendA;
                 }
