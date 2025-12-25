@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ColorGroup } from '../types';
 
-interface InfoBoxProps {
-  children: React.ReactNode;
-}
-
-const InfoBox: React.FC<InfoBoxProps> = ({ children }) => (
-  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 mt-2 shadow-sm animate-in fade-in zoom-in duration-200">
-    {children}
+// New component to handle the smooth sliding animation
+const ExpandableInfoBox: React.FC<{ isOpen: boolean; children: React.ReactNode }> = ({ isOpen, children }) => (
+  <div 
+    className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-in-out ${
+      isOpen ? 'grid-rows-[1fr] opacity-100 mb-2' : 'grid-rows-[0fr] opacity-0 mb-0'
+    }`}
+  >
+    <div className="overflow-hidden">
+      <div className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 shadow-sm mx-0.5">
+        {children}
+      </div>
+    </div>
   </div>
 );
 
@@ -66,13 +71,23 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   disableScaling, setDisableScaling, disablePostProcessing, setDisablePostProcessing,
   disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle
 }) => {
-  const [activeInfo, setActiveInfo] = useState<string | null>(null);
+  // CHANGED: State is now a Set instead of a string to allow multiple open boxes
+  const [activeInfos, setActiveInfos] = useState<Set<string>>(new Set());
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
   const [expandedSubcolors, setExpandedSubcolors] = useState<Set<string>>(new Set());
   const [subcolorLimit, setSubcolorLimit] = useState(16);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const toggleInfo = (key: string) => setActiveInfo(activeInfo === key ? null : key);
+  // CHANGED: Logic to add/remove keys from the Set
+  const toggleInfo = (key: string) => {
+    setActiveInfos(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const toggleSubcolorExpansion = (groupId: string) => {
     setExpandedSubcolors(prev => {
       const next = new Set(prev);
@@ -113,7 +128,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   }, [mobilePopup]);
 
   return (
-    <div ref={panelRef} className="flex flex-col gap-2 pb-0">
+    <div ref={panelRef} className="flex flex-col gap-6 pb-0">
       <div className="border-b border-[#333]/10 pb-3">
         <label className={`flex flex-col items-center justify-center w-full h-14 border-2 border-dashed rounded-xl cursor-pointer transition-all group relative overflow-hidden ${image ? 'border-[#333]/10 bg-white hover:border-[#333]/30' : 'border-[#33569a]/30 bg-[#33569a]/5 hover:bg-[#33569a]/10 hover:border-[#33569a]/50'}`}>
           <div className="flex flex-row items-center gap-3 z-10">
@@ -126,61 +141,84 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </label>
       </div>
 
-      <div className="space-y-2">
-        <div className="space-y-0.5">
-          <div className="flex justify-between items-center bg-slate-50 p-1 rounded-lg border border-slate-200 mb-1">
-            <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 ${disableScaling ? 'text-slate-400' : 'text-[#333]'}`}>Output Size</span>
-              <button onClick={() => toggleInfo('scale')} className="text-[#33569a] hover:opacity-70"><i className="fa-solid fa-circle-info"></i></button>
-            </div>
-            <span className={`font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px] ${disableScaling ? 'text-slate-400' : 'text-[#33569a]'}`}>{upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}</span>
+      {/* Output Size Section */}
+      <div className="flex flex-col gap-0.25">
+        <div className="flex justify-between items-center mb-2 border-b border-[#333]/5 pb-1">
+          <div className="flex items-center gap-2">
+            <span className={`text-[11px] font-bold uppercase tracking-widest ${disableScaling ? 'text-slate-300' : 'text-[#333]/40'}`}>Output Size</span>
+            <button onClick={() => toggleInfo('scale')} className={`transition-colors ${activeInfos.has('scale') ? 'text-[#33569a]' : 'text-[#333]/40 hover:text-[#33569a]'}`}><i className="fa-solid fa-circle-info"></i></button>
           </div>
-          <div className={`grid grid-cols-4 gap-1.5 transition-opacity ${disableScaling ? 'opacity-40 pointer-events-none' : ''}`}>
-            {[1, 2, 4].map(f => (
-              <button key={f} onClick={() => setUpscaleFactor(f as number)} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === f ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>{f}X</button>
-            ))}
-            <button onClick={() => setUpscaleFactor('NS')} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === 'NS' ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>Auto</button>
-          </div>
-          {isSvg && activeInfo === 'scale' && <InfoBox><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Scaling is disabled; SVGs maintain infinite resolution.</InfoBox>}
-          {!isSvg && activeInfo === 'scale' && <InfoBox>Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb.</InfoBox>}
+          <span className={`font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px] ${disableScaling ? 'text-slate-300' : 'text-[#33569a]'}`}>{upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}</span>
         </div>
 
-        <div className="space-y-2 pt-2 border-t border-[#333]/10">
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-            <button onClick={() => setDisablePostProcessing(!disablePostProcessing)} className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disablePostProcessing ? 'bg-[#333]' : 'bg-slate-300'}`}>
-              <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disablePostProcessing ? 'translate-x-4' : 'translate-x-0'}`} />
-            </button>
-            <span className={`text-[10px] font-bold uppercase tracking-wide ${disablePostProcessing ? 'text-slate-400' : 'text-[#333]'}`}>Cleanup & Quality</span>
-            {isSvg && <button onClick={() => toggleInfo('svg-pp')} className="text-amber-500 hover:opacity-70 ml-auto"><i className="fa-solid fa-circle-info"></i></button>}
-          </div>
-          {isSvg && activeInfo === 'svg-pp' && <InfoBox><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Processing is disabled to preserve original vector precision.</InfoBox>}
+        {/* Animated Expandable InfoBox */}
+        <ExpandableInfoBox isOpen={activeInfos.has('scale')}>
+          {isSvg ? (
+            <>
+              <div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>
+              Scaling is disabled; SVGs maintain infinite resolution.
+            </>
+          ) : (
+            "Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb."
+          )}
+        </ExpandableInfoBox>
 
-          <div className={`space-y-2 transition-opacity ${disablePostProcessing ? 'opacity-40 pointer-events-none' : ''}`}>
-            {[{ label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
-            { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
-            { label: 'Corner Protection', val: vertexInertia, set: setVertexInertia, max: 100, step: 10, info: 'inertia', desc: 'Preserves sharp vertices.' },
-            { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' }
-            ].map(s => (
-              <div key={s.label} className="space-y-0.5">
-                <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-                  <div className="flex items-center gap-2"><span>{s.label}</span><button onClick={() => toggleInfo(s.info)} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button></div>
-                  <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{s.val === 0 ? "OFF" : s.val + (s.max > 10 ? "%" : "px")}</span>
-                </div>
-                <input type="range" min="0" max={s.max} step={s.step} value={s.val} onChange={(e) => s.set(parseInt(e.target.value))} className="custom-slider" />
-                {activeInfo === s.info && <InfoBox>{s.desc}</InfoBox>}
-              </div>
-            ))}
-          </div>
+        <div className={`grid grid-cols-4 gap-1.5 transition-opacity ${disableScaling ? 'opacity-40 pointer-events-none' : ''}`}>
+          {[1, 2, 4].map(f => (
+            <button key={f} onClick={() => setUpscaleFactor(f as number)} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === f ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>{f}X</button>
+          ))}
+          <button onClick={() => setUpscaleFactor('NS')} className={`px-1 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${upscaleFactor === 'NS' ? 'bg-[#333] text-white border-[#333] shadow-md' : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>Auto</button>
         </div>
       </div>
 
-      <div className="mb-1.5 px-0.5">
-        <div className="flex items-center justify-between mb-1 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+      {/* Cleanup & Quality Section */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 mb-2 border-b border-[#333]/5 pb-1">
+          <button onClick={() => setDisablePostProcessing(!disablePostProcessing)} className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disablePostProcessing ? 'bg-[#333]' : 'bg-slate-300'}`}>
+            <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disablePostProcessing ? 'translate-x-4' : 'translate-x-0'}`} />
+          </button>
+          <span className={`text-[11px] font-bold uppercase tracking-widest flex-1 ${disablePostProcessing ? 'text-slate-300' : 'text-[#333]/40'}`}>Cleanup & Quality</span>
+          {isSvg && <button onClick={() => toggleInfo('svg-pp')} className={`transition-colors ml-auto ${activeInfos.has('svg-pp') ? 'text-amber-500' : 'text-amber-500/70 hover:text-amber-500'}`}><i className="fa-solid fa-circle-info"></i></button>}
+        </div>
+
+        {isSvg && (
+          <ExpandableInfoBox isOpen={activeInfos.has('svg-pp')}>
+            <div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>
+            Processing is disabled to preserve original vector precision.
+          </ExpandableInfoBox>
+        )}
+
+        <div className={`space-y-2 transition-opacity ${disablePostProcessing ? 'opacity-40 pointer-events-none' : ''}`}>
+          {[{ label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
+          { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
+          { label: 'Corner Protection', val: vertexInertia, set: setVertexInertia, max: 100, step: 10, info: 'inertia', desc: 'Preserves sharp vertices.' },
+          { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' }
+          ].map(s => (
+            <div key={s.label} className="space-y-0.5">
+              <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+                <div className="flex items-center gap-2">
+                  <span>{s.label}</span>
+                  <button onClick={() => toggleInfo(s.info)} className={`px-1 transition-colors ${activeInfos.has(s.info) ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}><i className="fa-solid fa-circle-info"></i></button>
+                </div>
+                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{s.val === 0 ? "OFF" : s.val + (s.max > 10 ? "%" : "px")}</span>
+              </div>
+              <ExpandableInfoBox isOpen={activeInfos.has(s.info)}>
+                {s.desc}
+              </ExpandableInfoBox>
+              <input type="range" min="0" max={s.max} step={s.step} value={s.val} onChange={(e) => s.set(parseInt(e.target.value))} className="custom-slider" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Color Mapping Section */}
+      <div className="px-0.5">
+        <div className="flex items-center justify-between mb-2 border-b border-[#333]/5 pb-1">
           <div className="flex items-center gap-2">
             <button onClick={() => setDisableRecoloring(!disableRecoloring)} className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disableRecoloring ? 'bg-[#333]' : 'bg-slate-300'}`}>
               <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disableRecoloring ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
-            <h3 className={`text-[10px] uppercase font-bold m-0 tracking-wide ${disableRecoloring ? 'text-slate-400' : 'text-[#333]'}`}>Color Mapping</h3>
+            <h3 className={`text-[11px] uppercase font-bold m-0 tracking-widest ${disableRecoloring ? 'text-slate-300' : 'text-[#333]/40'}`}>Color Mapping</h3>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={onRecomputeGroups} disabled={disableRecoloring || colorGroups.length === 0} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}><i className="fa-solid fa-arrows-rotate mr-1"></i> Recompute</button>
@@ -192,12 +230,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
             <div className="flex items-center gap-2">
               <span>Color Grouping</span>
-              <button onClick={() => toggleInfo('grouping')} className="text-[#33569a] hover:opacity-70 px-1"><i className="fa-solid fa-circle-info"></i></button>
+              <button onClick={() => toggleInfo('grouping')} className={`px-1 transition-colors ${activeInfos.has('grouping') ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}><i className="fa-solid fa-circle-info"></i></button>
             </div>
             <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{colorGroupingDistance}</span>
           </div>
+          <ExpandableInfoBox isOpen={activeInfos.has('grouping')}>
+            Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups.
+          </ExpandableInfoBox>
           <input type="range" min="5" max="100" step="5" value={colorGroupingDistance} onChange={(e) => setColorGroupingDistance(parseInt(e.target.value))} className="custom-slider" />
-          {activeInfo === 'grouping' && <InfoBox>Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups.</InfoBox>}
         </div>
         
         <p className="text-[10px] text-slate-500 leading-tight">Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.</p>
@@ -289,7 +329,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
           );
         })}
-        {/* Only show "Create new group" drop zone if dragging a single SUBCOLOR */}
         {draggedItem && draggedItem.type === 'color' && (
           <div className="p-3 rounded-xl border-2 border-dashed border-[#33569a] bg-[#33569a]/5 flex items-center justify-center gap-2 text-[#33569a] font-bold text-[10px] uppercase tracking-wide transition-all hover:bg-[#33569a]/10" onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={(e) => { e.preventDefault(); if (!draggedItem) return; if (draggedItem.type === 'color' && draggedItem.colorHex) { onMoveColor(draggedItem.colorHex, draggedItem.groupId, 'new'); } setDraggedItem(null); }}>
             <i className="fa-solid fa-plus-circle"></i><span>Drop here to create new group</span>

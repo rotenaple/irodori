@@ -398,7 +398,7 @@ const App: React.FC = () => {
       <main className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
         <aside className="w-full md:w-96 lg:w-[420px] px-0 md:pl-10 flex-none md:h-full border-r border-[#333]/5 bg-white flex flex-col relative z-10">
           <div className="px-4 md:px-6 py-4 overflow-y-auto md:overflow-y-auto custom-scrollbar flex-1 min-h-[400px] md:min-h-0">
-            <h2 className="text-[11px] font-bold uppercase tracking-widest mb-2 text-[#333]/40 border-b border-[#333]/5 pb-1">Configurations</h2>
+            {/* Configurations Heading Removed */}
             <ControlPanel
               upscaleFactor={upscaleFactor} setUpscaleFactor={setUpscaleFactor}
               denoiseRadius={denoiseRadius} setDenoiseRadius={setDenoiseRadius}
