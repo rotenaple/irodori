@@ -19,7 +19,7 @@ interface SectionHeaderProps {
   title: string;
   isEnabled?: boolean;
   onToggleEnabled?: () => void;
-  toggleDisabled?: boolean; // New prop to disable the toggle interaction without hiding it
+  toggleDisabled?: boolean;
   infoKey?: string;
   isInfoActive?: boolean;
   onInfoToggle?: () => void;
@@ -77,7 +77,6 @@ interface SliderControlProps {
 const SliderControl: React.FC<SliderControlProps> = ({ 
   label, value, max, step, onChange, infoKey, description, isInfoOpen, onInfoToggle, unit 
 }) => {
-  // Logic fix: explicitly check against undefined so empty string "" is respected as "no unit"
   const displayUnit = unit !== undefined ? unit : (max > 10 ? "%" : "px");
 
   return (
@@ -188,6 +187,16 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const isTouchDevice = typeof window !== 'undefined' && 'ontouchstart' in window;
 
   useEffect(() => {
+    if (isSvg) {
+      setDisablePostProcessing(true);
+      setDisableScaling(true);
+    } else if (image) {
+      setDisablePostProcessing(false);
+      setDisableScaling(false);
+    }
+  }, [image, isSvg, setDisablePostProcessing, setDisableScaling]);
+
+  useEffect(() => {
     if (!panelRef.current) return;
     const calculateLimit = () => {
       if (!panelRef.current) return;
@@ -216,7 +225,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     };
   }, [mobilePopup]);
 
-  // Config for Post Processing Sliders to map over
   const cleanupControls = [
     { label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
     { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
@@ -336,14 +344,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 description="Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups."
                 isInfoOpen={activeInfos.has('grouping')}
                 onInfoToggle={() => toggleInfo('grouping')}
-                unit="" // Passing empty string explicitly for "no unit"
+                unit="" 
               />
           </div>
           <p className="text-[10px] text-slate-500 leading-tight">Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.</p>
         </div>
       </div>
 
-      {/* 5. Color Groups List (Logic heavy, keeping inline but clean) */}
+      {/* 5. Color Groups List */}
       <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
         {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
