@@ -180,34 +180,49 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // This ensures the user's manual groupings override mathematical distance.
         const colorToGroupIdx = new Map<string, number>();
         const paletteIdMap = new Map<string, number>();
+        
+        // Pre-cache palette colors in arrays for faster access
+        const paletteSize = matchPalette.length;
+        const paletteR = new Uint8Array(paletteSize);
+        const paletteG = new Uint8Array(paletteSize);
+        const paletteB = new Uint8Array(paletteSize);
+        const paletteIds = new Array<string>(paletteSize);
 
         // Create quick lookup: Palette ID -> Index in matchPalette array
-        matchPalette.forEach((p, idx) => paletteIdMap.set(p.id, idx));
+        for (let idx = 0; idx < paletteSize; idx++) {
+            const p = matchPalette[idx];
+            paletteIdMap.set(p.id, idx);
+            paletteR[idx] = p.r;
+            paletteG[idx] = p.g;
+            paletteB[idx] = p.b;
+            paletteIds[idx] = p.id;
+        }
 
         // 2. Populate Group Mappings (Priority: Explicit Group Members)
         // Accessing parameters.colorGroups ensures we see all members currently assigned in the UI
         if (parameters.colorGroups) {
-            parameters.colorGroups.forEach(group => {
+            for (let i = 0; i < parameters.colorGroups.length; i++) {
+                const group = parameters.colorGroups[i];
                 const pIdx = paletteIdMap.get(group.id);
                 // Only if the group is actually part of the active palette (enabled)
                 if (pIdx !== undefined) {
-                    group.members.forEach(m => {
-                        colorToGroupIdx.set(m.hex.toLowerCase(), pIdx);
-                    });
+                    for (let j = 0; j < group.members.length; j++) {
+                        colorToGroupIdx.set(group.members[j].hex.toLowerCase(), pIdx);
+                    }
                 }
-            });
+            }
         }
 
         // 3. Ensure Palette Heads are mapped (Secondary)
         // This handles manual layers or colors that might not be in the 'members' list (e.g. initial seeds)
-        matchPalette.forEach((p, idx) => {
-            const hex = p.hex.toLowerCase();
+        for (let idx = 0; idx < paletteSize; idx++) {
+            const hex = matchPalette[idx].hex.toLowerCase();
             if (!colorToGroupIdx.has(hex)) {
                 colorToGroupIdx.set(hex, idx);
             }
-        });
+        }
 
-        // 4. Pixel Loop
+        // 4. Pixel Loop - Optimized with cached palette arrays
         for (let i = 0; i < nativePixelData.length; i += 4) {
             const r = nativePixelData[i];
             const g = nativePixelData[i + 1];
@@ -217,13 +232,24 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             // Step A: Check if this specific color is explicitly grouped
             let pIdx = colorToGroupIdx.get(hex);
 
-            // Step B: If not in a group, fall back to Nearest Neighbor logic
+            // Step B: If not in a group, fall back to Nearest Neighbor logic (optimized inline)
             if (pIdx === undefined) {
-                const pixel = { r, g, b };
-                const closest = findClosestColor(pixel, matchPalette);
-                // We find the index of the closest match
-                const foundIdx = paletteIdMap.get(closest.id);
-                pIdx = foundIdx !== undefined ? foundIdx : 0;
+                let minDistSq = Infinity;
+                let closestIdx = 0;
+                
+                // Inline distance calculation using cached arrays
+                for (let j = 0; j < paletteSize; j++) {
+                    const dr = r - paletteR[j];
+                    const dg = g - paletteG[j];
+                    const db = b - paletteB[j];
+                    const distSq = dr * dr + dg * dg + db * db;
+                    
+                    if (distSq < minDistSq) {
+                        minDistSq = distSq;
+                        closestIdx = j;
+                    }
+                }
+                pIdx = closestIdx;
             }
 
             lowResIdxMap[i / 4] = pIdx;
@@ -243,69 +269,86 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             if (effectiveEdgeProtection > 85) { radius = 5; iterations = 5; }
 
             const tempIdxMap = new Int16Array(lowResIdxMap.length);
-            const paletteSize = matchPalette.length;
 
             for (let iter = 0; iter < iterations; iter++) {
                 for (let y = 0; y < nativeHeight; y++) {
                     const yStart = Math.max(0, y - radius);
                     const yEnd = Math.min(nativeHeight - 1, y + radius);
+                    const rowOffset = y * nativeWidth;
 
                     for (let x = 0; x < nativeWidth; x++) {
                         const xStart = Math.max(0, x - radius);
                         const xEnd = Math.min(nativeWidth - 1, x + radius);
 
-                        const idx = y * nativeWidth + x;
+                        const idx = rowOffset + x;
                         const currentIdx = lowResIdxMap[idx];
                         const sIdx = idx * 4;
-                        const src = { r: nativePixelData[sIdx], g: nativePixelData[sIdx + 1], b: nativePixelData[sIdx + 2] };
+                        const srcR = nativePixelData[sIdx];
+                        const srcG = nativePixelData[sIdx + 1];
+                        const srcB = nativePixelData[sIdx + 2];
 
-                        const localCounts = new Map<number, number>();
+                        // Count local palette indices (use Uint32Array to prevent overflow)
+                        const localCounts = new Uint32Array(paletteSize);
                         for (let ny = yStart; ny <= yEnd; ny++) {
+                            const nyOffset = ny * nativeWidth;
                             for (let nx = xStart; nx <= xEnd; nx++) {
-                                const nIdx = lowResIdxMap[ny * nativeWidth + nx];
-                                localCounts.set(nIdx, (localCounts.get(nIdx) || 0) + 1);
+                                const nIdx = lowResIdxMap[nyOffset + nx];
+                                localCounts[nIdx]++;
                             }
                         }
 
-                        // 2. Identify candidates
-                        const sorted = Array.from(localCounts.entries())
-                            .sort((a, b) => b[1] - a[1]);
-
-                        let major1Idx = sorted[0][0];
-                        let major2Idx = sorted.length > 1 ? sorted[1][0] : major1Idx;
-                        let m3 = sorted.length > 2 ? sorted[2][0] : major2Idx;
+                        // 2. Identify candidates - find top 3 by count
+                        let major1Idx = 0, major1Count = 0;
+                        let major2Idx = 0, major2Count = 0;
+                        let m3 = 0, m3Count = 0;
+                        
+                        for (let i = 0; i < paletteSize; i++) {
+                            const count = localCounts[i];
+                            if (count > major1Count) {
+                                m3 = major2Idx; m3Count = major2Count;
+                                major2Idx = major1Idx; major2Count = major1Count;
+                                major1Idx = i; major1Count = count;
+                            } else if (count > major2Count) {
+                                m3 = major2Idx; m3Count = major2Count;
+                                major2Idx = i; major2Count = count;
+                            } else if (count > m3Count) {
+                                m3 = i; m3Count = count;
+                            }
+                        }
 
                         // BETWEENNESS FILTER:
                         if (major1Idx !== major2Idx && major2Idx !== m3) {
-                            const p1 = matchPalette[major1Idx], p2 = matchPalette[major2Idx], p3 = matchPalette[m3];
-                            const d13 = Math.sqrt((p1.r - p3.r) ** 2 + (p1.g - p3.g) ** 2 + (p1.b - p3.b) ** 2);
-                            const d12 = Math.sqrt((p1.r - p2.r) ** 2 + (p1.g - p2.g) ** 2 + (p1.b - p2.b) ** 2);
-                            const d23 = Math.sqrt((p3.r - p2.r) ** 2 + (p3.g - p2.g) ** 2 + (p3.b - p2.b) ** 2);
-                            if (d12 + d23 < d13 * 1.10) { major2Idx = m3; }
+                            const p1r = paletteR[major1Idx], p1g = paletteG[major1Idx], p1b = paletteB[major1Idx];
+                            const p2r = paletteR[major2Idx], p2g = paletteG[major2Idx], p2b = paletteB[major2Idx];
+                            const p3r = paletteR[m3], p3g = paletteG[m3], p3b = paletteB[m3];
+                            
+                            const d13 = Math.sqrt((p1r - p3r) ** 2 + (p1g - p3g) ** 2 + (p1b - p3b) ** 2);
+                            const d12 = Math.sqrt((p1r - p2r) ** 2 + (p1g - p2g) ** 2 + (p1b - p2b) ** 2);
+                            const d23 = Math.sqrt((p3r - p2r) ** 2 + (p3g - p2g) ** 2 + (p3b - p2b) ** 2);
+                            if (d12 + d23 < d13 * 1.10) { major2Idx = m3; major2Count = m3Count; }
                         }
 
                         // REPRESENTATION FILTER (SAFE 10%):
                         // Only "melt" if the shape is truly tiny/isolated noise.
                         const totalWindow = (yEnd - yStart + 1) * (xEnd - xStart + 1);
-                        const m2Count = localCounts.get(major2Idx) || 0;
-                        if (m2Count < totalWindow * 0.10) { major2Idx = major1Idx; }
+                        if (major2Count < totalWindow * 0.10) { major2Idx = major1Idx; }
 
                         // 3. Topology cleaning:
                         if (currentIdx !== major1Idx && currentIdx !== major2Idx) {
-                            const pC = matchPalette[currentIdx];
-                            const p1 = matchPalette[major1Idx];
-                            const p2 = matchPalette[major2Idx];
-                            const d1 = (pC.r - p1.r) ** 2 + (pC.g - p1.g) ** 2 + (pC.b - p1.b) ** 2;
-                            const d2 = (pC.r - p2.r) ** 2 + (pC.g - p2.g) ** 2 + (pC.b - p2.b) ** 2;
+                            const pCr = paletteR[currentIdx], pCg = paletteG[currentIdx], pCb = paletteB[currentIdx];
+                            const p1r = paletteR[major1Idx], p1g = paletteG[major1Idx], p1b = paletteB[major1Idx];
+                            const p2r = paletteR[major2Idx], p2g = paletteG[major2Idx], p2b = paletteB[major2Idx];
+                            const d1 = (pCr - p1r) ** 2 + (pCg - p1g) ** 2 + (pCb - p1b) ** 2;
+                            const d2 = (pCr - p2r) ** 2 + (pCg - p2g) ** 2 + (pCb - p2b) ** 2;
                             tempIdxMap[idx] = d1 < d2 ? major1Idx : major2Idx;
                             continue;
                         }
 
                         // 4. Resolve between majors - Source Similarity Multiplier
-                        const p1 = matchPalette[major1Idx];
-                        const p2 = matchPalette[major2Idx];
-                        let err1 = (src.r - p1.r) ** 2 + (src.g - p1.g) ** 2 + (src.b - p1.b) ** 2;
-                        let err2 = (src.r - p2.r) ** 2 + (src.g - p2.g) ** 2 + (src.b - p2.b) ** 2;
+                        const p1r = paletteR[major1Idx], p1g = paletteG[major1Idx], p1b = paletteB[major1Idx];
+                        const p2r = paletteR[major2Idx], p2g = paletteG[major2Idx], p2b = paletteB[major2Idx];
+                        let err1 = (srcR - p1r) ** 2 + (srcG - p1g) ** 2 + (srcB - p1b) ** 2;
+                        let err2 = (srcR - p2r) ** 2 + (srcG - p2g) ** 2 + (srcB - p2b) ** 2;
 
                         const stiffness = 1.0 - (vertexInertia / 100) * 0.8;
                         if (currentIdx === major1Idx) err1 *= stiffness;
@@ -343,23 +386,49 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         const scaleX = finalWorkspaceWidth / nativeWidth;
         const scaleY = finalWorkspaceHeight / nativeHeight;
+        
+        // Pre-cache targetHex conversions for all palette colors
+        const paletteTargetR = new Uint8Array(paletteSize);
+        const paletteTargetG = new Uint8Array(paletteSize);
+        const paletteTargetB = new Uint8Array(paletteSize);
+        for (let i = 0; i < paletteSize; i++) {
+            const p = matchPalette[i];
+            if (p.targetHex) {
+                const rgb = hexToRgb(p.targetHex);
+                if (rgb) {
+                    paletteTargetR[i] = rgb.r;
+                    paletteTargetG[i] = rgb.g;
+                    paletteTargetB[i] = rgb.b;
+                } else {
+                    paletteTargetR[i] = paletteR[i];
+                    paletteTargetG[i] = paletteG[i];
+                    paletteTargetB[i] = paletteB[i];
+                }
+            } else {
+                paletteTargetR[i] = paletteR[i];
+                paletteTargetG[i] = paletteG[i];
+                paletteTargetB[i] = paletteB[i];
+            }
+        }
+        
+        // Pre-allocate reusable arrays for pixel loop to reduce allocations
+        const reuseLocalWeights = new Float32Array(paletteSize);
+        const reuseAdjWhitelist = new Uint8Array(paletteSize);
+        const reuseScores = new Float32Array(paletteSize);
 
         for (let y = 0; y < finalWorkspaceHeight; y++) {
             // Pre-calculate Y neighbors
             const ly = Math.min(nativeHeight - 1, Math.floor(y / scaleY));
-            const yMin = Math.max(0, ly - 1);
-            const yMax = Math.min(nativeHeight - 1, ly + 1);
+            const lyOffset = ly * nativeWidth;
 
             for (let x = 0; x < finalWorkspaceWidth; x++) {
                 const lx = Math.min(nativeWidth - 1, Math.floor(x / scaleX));
                 const idx = y * finalWorkspaceWidth + x;
                 const outIdx = idx * 4;
 
-                const currentRefColor = {
-                    r: highResPixelData[outIdx],
-                    g: highResPixelData[outIdx + 1],
-                    b: highResPixelData[outIdx + 2]
-                };
+                const refR = highResPixelData[outIdx];
+                const refG = highResPixelData[outIdx + 1];
+                const refB = highResPixelData[outIdx + 2];
 
                 // 1. Regularize the local candidates list (Expand to 5x5)
                 const yMin = Math.max(0, ly - 2);
@@ -367,12 +436,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const xMin = Math.max(0, lx - 2);
                 const xMax = Math.min(nativeWidth - 1, lx + 2);
 
-                let localWeights = new Map<number, number>();
+                // Reuse typed array instead of allocating new one - clear it first
+                reuseLocalWeights.fill(0);
                 for (let ny = yMin; ny <= yMax; ny++) {
                     const dy = Math.abs(ny - ly);
+                    const nyOffset = ny * nativeWidth;
                     for (let nx = xMin; nx <= xMax; nx++) {
                         const dx = Math.abs(nx - lx);
-                        const nIdx = lowResIdxMap[ny * nativeWidth + nx];
+                        const nIdx = lowResIdxMap[nyOffset + nx];
 
                         // GAUSSIAN WEIGHTING:
                         // Center = 1.0, 1px away = 0.5, 2px away = 0.2
@@ -380,76 +451,133 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         if (dx > 0 || dy > 0) weight = 0.5;
                         if (dx > 1 || dy > 1) weight = 0.2;
 
-                        localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + weight);
+                        reuseLocalWeights[nIdx] += weight;
                     }
                 }
-                // 1. Identify all unique candidates in the 1x neighborhood
-                const uniqueCandidates = Array.from(localWeights.keys());
+                
+                // 1. Identify all unique candidates in the neighborhood
+                const uniqueCandidates: number[] = [];
+                for (let i = 0; i < paletteSize; i++) {
+                    if (reuseLocalWeights[i] > 0) uniqueCandidates.push(i);
+                }
 
                 // 2. STRUCTURAL FILTER (ARTIFACT REJECTION):
                 // If a color in the neighborhood is mathematically a "Between" color 
                 // of two other colors IN THE SAME neighborhood, it is an artifact (anti-aliasing).
                 // We reject it from being a blend partner.
-                const structuralCandidates = uniqueCandidates.filter(cIdx => {
-                    const pC = matchPalette[cIdx];
-                    const weightC = localWeights.get(cIdx) || 0;
+                const structuralCandidates: number[] = [];
+                const ucLen = uniqueCandidates.length;
+                
+                candidateLoop: for (let ci = 0; ci < ucLen; ci++) {
+                    const cIdx = uniqueCandidates[ci];
+                    const pCr = paletteR[cIdx];
+                    const pCg = paletteG[cIdx];
+                    const pCb = paletteB[cIdx];
+                    const weightC = reuseLocalWeights[cIdx];
 
-                    for (const aIdx of uniqueCandidates) {
-                        for (const bIdx of uniqueCandidates) {
-                            if (aIdx === cIdx || bIdx === cIdx || aIdx === bIdx) continue;
+                    for (let ai = 0; ai < ucLen; ai++) {
+                        const aIdx = uniqueCandidates[ai];
+                        if (aIdx === cIdx) continue;
+                        
+                        for (let bi = 0; bi < ucLen; bi++) {
+                            const bIdx = uniqueCandidates[bi];
+                            if (bIdx === cIdx || aIdx === bIdx) continue;
 
-                            const pA = matchPalette[aIdx], pB = matchPalette[bIdx];
-                            const weightA = localWeights.get(aIdx) || 0, weightB = localWeights.get(bIdx) || 0;
+                            const pAr = paletteR[aIdx];
+                            const pAg = paletteG[aIdx];
+                            const pAb = paletteB[aIdx];
+                            const pBr = paletteR[bIdx];
+                            const pBg = paletteG[bIdx];
+                            const pBb = paletteB[bIdx];
+                            const weightA = reuseLocalWeights[aIdx];
+                            const weightB = reuseLocalWeights[bIdx];
 
-                            const dAB = Math.sqrt((pA.r - pB.r) ** 2 + (pA.g - pB.g) ** 2 + (pA.b - pB.b) ** 2);
-                            const dAC = Math.sqrt((pA.r - pC.r) ** 2 + (pA.g - pC.g) ** 2 + (pA.b - pC.b) ** 2);
-                            const dBC = Math.sqrt((pB.r - pC.r) ** 2 + (pB.g - pC.g) ** 2 + (pB.b - pC.b) ** 2);
+                            const dAB = Math.sqrt((pAr - pBr) ** 2 + (pAg - pBg) ** 2 + (pAb - pBb) ** 2);
+                            const dAC = Math.sqrt((pAr - pCr) ** 2 + (pAg - pCg) ** 2 + (pAb - pCb) ** 2);
+                            const dBC = Math.sqrt((pBr - pCr) ** 2 + (pBg - pCg) ** 2 + (pBb - pCb) ** 2);
 
                             // RULE: Reject C if it's between A and B, AND A and B are both 'stronger' shapes in context.
                             // Increased tolerance to 1.10 to catch JPG noise.
                             if (dAC + dBC < dAB * 1.10 && dAB > 10) {
                                 if (weightA > weightC && weightB > weightC) {
-                                    return false; // Transitional artifact detected
+                                    continue candidateLoop; // Transitional artifact detected
                                 }
                             }
                         }
                     }
-                    return true;
-                });
+                    structuralCandidates.push(cIdx);
+                }
                 // 3. Identify the STRUCTURAL MAJORS (with Adjacency Gating)
                 // Any color not in the immediate 3x3 is hit with a massive penalty.
-                const adjWhitelist = new Set<number>();
-                const y3Min = Math.max(0, ly - 1), y3Max = Math.min(nativeHeight - 1, ly + 1);
-                const x3Min = Math.max(0, lx - 1), x3Max = Math.min(nativeWidth - 1, lx + 1);
+                reuseAdjWhitelist.fill(0); // Clear from previous iteration
+                const y3Min = Math.max(0, ly - 1);
+                const y3Max = Math.min(nativeHeight - 1, ly + 1);
+                const x3Min = Math.max(0, lx - 1);
+                const x3Max = Math.min(nativeWidth - 1, lx + 1);
                 for (let ny = y3Min; ny <= y3Max; ny++) {
+                    const nyOffset = ny * nativeWidth;
                     for (let nx = x3Min; nx <= x3Max; nx++) {
-                        adjWhitelist.add(lowResIdxMap[ny * nativeWidth + nx]);
+                        reuseAdjWhitelist[lowResIdxMap[nyOffset + nx]] = 1;
                     }
                 }
 
-                const scoredStructural = structuralCandidates.map(cIdx => {
-                    const p = matchPalette[cIdx];
-                    const weight = localWeights.get(cIdx) || 0;
-                    const err = (currentRefColor.r - p.r) ** 2 + (currentRefColor.g - p.g) ** 2 + (currentRefColor.b - p.b) ** 2;
+                // Score structural candidates - reuse array
+                const scLen = structuralCandidates.length;
+                let maxScore = -Infinity;
+                let maxIdx = 0;
+                
+                for (let i = 0; i < scLen; i++) {
+                    const cIdx = structuralCandidates[i];
+                    const pR = paletteR[cIdx];
+                    const pG = paletteG[cIdx];
+                    const pB = paletteB[cIdx];
+                    const weight = reuseLocalWeights[cIdx];
+                    const dr = refR - pR;
+                    const dg = refG - pG;
+                    const db = refB - pB;
+                    const err = dr * dr + dg * dg + db * db;
 
                     // ADJACENCY GATING: Hard penalty for non-touching colors.
-                    const gatingPenalty = adjWhitelist.has(cIdx) ? 0 : -1000;
+                    const gatingPenalty = reuseAdjWhitelist[cIdx] ? 0 : -1000;
 
                     // Score = Mass weight + Adjacency Gate + Error penalty
-                    return { id: cIdx, score: (weight * 10) + gatingPenalty - Math.sqrt(err) };
-                }).sort((a, b) => b.score - a.score);
+                    const score = (weight * 10) + gatingPenalty - Math.sqrt(err);
+                    reuseScores[i] = score;
+                    if (score > maxScore) {
+                        maxScore = score;
+                        maxIdx = i;
+                    }
+                }
 
-                const major1Idx = scoredStructural[0]?.id ?? uniqueCandidates[0];
-                const major2Idx = (scoredStructural.length > 1 && scoredStructural[1].score > -500)
-                    ? scoredStructural[1].id
-                    : major1Idx;
+                // Find top 2 by score
+                let major1Idx = scLen > 0 ? structuralCandidates[maxIdx] : uniqueCandidates[0];
+                let major2Idx = major1Idx;
+                let secondMaxScore = -Infinity;
+                
+                for (let i = 0; i < scLen; i++) {
+                    if (i !== maxIdx && reuseScores[i] > secondMaxScore) {
+                        secondMaxScore = reuseScores[i];
+                        major2Idx = structuralCandidates[i];
+                    }
+                }
+                
+                if (secondMaxScore <= -500) {
+                    major2Idx = major1Idx;
+                }
+                
                 // 4. Determine Resolve Pair
-                const coreIdx = lowResIdxMap[ly * nativeWidth + lx];
+                const coreIdx = lowResIdxMap[lyOffset + lx];
                 let blendA = coreIdx;
                 let blendB = major1Idx;
 
                 // Is the core pixel itself an artifact?
-                const isCoreStructural = structuralCandidates.includes(coreIdx);
+                let isCoreStructural = false;
+                for (let i = 0; i < scLen; i++) {
+                    if (structuralCandidates[i] === coreIdx) {
+                        isCoreStructural = true;
+                        break;
+                    }
+                }
 
                 if (!isCoreStructural) {
                     // CORE IS ARTIFACT: Solve strictly between the real shapes
@@ -462,28 +590,33 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
                 // Disallow smoothing if the second shape weight is truly trace
-                const weightB = localWeights.get(blendB) || 0;
+                const weightB = reuseLocalWeights[blendB];
                 if (weightB < 0.3) {
                     blendB = blendA;
                 }
 
-                let finalColor: ColorRGB & { id: string };
+                let finalR: number, finalG: number, finalB: number;
 
                 if (blendA === blendB) {
-                    const p = matchPalette[blendA];
-                    const rgb = p.targetHex ? hexToRgb(p.targetHex)! : { r: p.r, g: p.g, b: p.b };
-                    finalColor = { ...rgb, id: p.id };
+                    finalR = paletteTargetR[blendA];
+                    finalG = paletteTargetG[blendA];
+                    finalB = paletteTargetB[blendA];
                 } else if (effectiveSmoothingLevels === 0) {
-                    const p1 = matchPalette[blendA], p2 = matchPalette[blendB];
-                    const dist1 = (currentRefColor.r - p1.r) ** 2 + (currentRefColor.g - p1.g) ** 2 + (currentRefColor.b - p1.b) ** 2;
-                    const dist2 = (currentRefColor.r - p2.r) ** 2 + (currentRefColor.g - p2.g) ** 2 + (currentRefColor.b - p2.b) ** 2;
-                    const winner = dist1 < dist2 ? p1 : p2;
-                    const rgb = winner.targetHex ? hexToRgb(winner.targetHex)! : { r: winner.r, g: winner.g, b: winner.b };
-                    finalColor = { ...rgb, id: winner.id };
+                    const p1R = paletteR[blendA], p1G = paletteG[blendA], p1B = paletteB[blendA];
+                    const p2R = paletteR[blendB], p2G = paletteG[blendB], p2B = paletteB[blendB];
+                    const dr1 = refR - p1R, dg1 = refG - p1G, db1 = refB - p1B;
+                    const dr2 = refR - p2R, dg2 = refG - p2G, db2 = refB - p2B;
+                    const dist1 = dr1 * dr1 + dg1 * dg1 + db1 * db1;
+                    const dist2 = dr2 * dr2 + dg2 * dg2 + db2 * db2;
+                    const winnerIdx = dist1 < dist2 ? blendA : blendB;
+                    finalR = paletteTargetR[winnerIdx];
+                    finalG = paletteTargetG[winnerIdx];
+                    finalB = paletteTargetB[winnerIdx];
                 } else {
-                    const c1p = matchPalette[blendA], c2p = matchPalette[blendB];
-                    const dr = c2p.r - c1p.r, dg = c2p.g - c1p.g, db = c2p.b - c1p.b;
-                    const pr = currentRefColor.r - c1p.r, pg = currentRefColor.g - c1p.g, pb = currentRefColor.b - c1p.b;
+                    const c1R = paletteR[blendA], c1G = paletteG[blendA], c1B = paletteB[blendA];
+                    const c2R = paletteR[blendB], c2G = paletteG[blendB], c2B = paletteB[blendB];
+                    const dr = c2R - c1R, dg = c2G - c1G, db = c2B - c1B;
+                    const pr = refR - c1R, pg = refG - c1G, pb = refB - c1B;
                     const lenSq = dr * dr + dg * dg + db * db;
 
                     let bestT = 0;
@@ -501,8 +634,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         const isFringe = bestT < fringeWindow || bestT > (1 - fringeWindow);
 
                         if (isFringe) {
-                            const midR = (c1p.r + c2p.r) / 2, midG = (c1p.g + c2p.g) / 2, midB = (c1p.b + c2p.b) / 2;
-                            const midDistRefSq = (c1p.r - midR) ** 2 + (c1p.g - midG) ** 2 + (c1p.b - midB) ** 2;
+                            const midR = (c1R + c2R) / 2, midG = (c1G + c2G) / 2, midB = (c1B + c2B) / 2;
+                            const dr1 = c1R - midR, dg1 = c1G - midG, db1 = c1B - midB;
+                            const midDistRefSq = dr1 * dr1 + dg1 * dg1 + db1 * db1;
 
                             let hasMidPointNeighbor = false;
                             // Search 5x5 at low, up to 7x7 at high intensity
@@ -515,7 +649,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                                     const nX = Math.max(0, Math.min(finalWorkspaceWidth - 1, x + nxOff));
                                     const nOutIdx = (nY * finalWorkspaceWidth + nX) * 4;
                                     const nr = highResPixelData[nOutIdx], ng = highResPixelData[nOutIdx + 1], nb = highResPixelData[nOutIdx + 2];
-                                    const nDistMidSq = (nr - midR) ** 2 + (ng - midG) ** 2 + (nb - midB) ** 2;
+                                    const drN = nr - midR, dgN = ng - midG, dbN = nb - midB;
+                                    const nDistMidSq = drN * drN + dgN * dgN + dbN * dbN;
 
                                     // Relax neighbor check at high intensity
                                     const similarityThreshold = 0.6 + (intensity * 0.2);
@@ -533,10 +668,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                     // 2. CONTEXTUAL BLIP FILTER:
                     if (bestT > 0 && bestT < 0.25) {
-                        const r = currentRefColor.r, g = currentRefColor.g, b = currentRefColor.b;
-                        const c1 = matchPalette[blendA], c2 = matchPalette[blendB];
-                        const noiseDistSq = (r - c1.r) ** 2 + (g - c1.g) ** 2 + (b - c1.b) ** 2;
-                        const transitionDistSq = (c1.r - c2.r) ** 2 + (c1.g - c2.g) ** 2 + (c1.b - c2.b) ** 2;
+                        const dr1 = refR - c1R, dg1 = refG - c1G, db1 = refB - c1B;
+                        const dr2 = c1R - c2R, dg2 = c1G - c2G, db2 = c1B - c2B;
+                        const noiseDistSq = dr1 * dr1 + dg1 * dg1 + db1 * db1;
+                        const transitionDistSq = dr2 * dr2 + dg2 * dg2 + db2 * db2;
                         // Reduce blip filter sensitivity as intensity increases
                         const blipSensitivity = 0.05 * (1 - intensity);
                         if (noiseDistSq < transitionDistSq * blipSensitivity) { bestT = 0; }
@@ -556,22 +691,18 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const rawS = 1 / (1 + Math.exp(-k * (bestT - 0.5)));
                     const finalT = (rawS - s0) / (s1 - s0);
 
-                    const p1 = matchPalette[blendA], p2 = matchPalette[blendB];
-                    const t1 = p1.targetHex ? hexToRgb(p1.targetHex)! : p1;
-                    const t2 = p2.targetHex ? hexToRgb(p2.targetHex)! : p2;
+                    const t1R = paletteTargetR[blendA], t1G = paletteTargetG[blendA], t1B = paletteTargetB[blendA];
+                    const t2R = paletteTargetR[blendB], t2G = paletteTargetG[blendB], t2B = paletteTargetB[blendB];
 
-                    finalColor = {
-                        r: Math.round(t1.r + finalT * (t2.r - t1.r)),
-                        g: Math.round(t1.g + finalT * (t2.g - t1.g)),
-                        b: Math.round(t1.b + finalT * (t2.b - t1.b)),
-                        id: `blend-${blendA}-${blendB}`
-                    };
+                    finalR = Math.round(t1R + finalT * (t2R - t1R));
+                    finalG = Math.round(t1G + finalT * (t2G - t1G));
+                    finalB = Math.round(t1B + finalT * (t2B - t1B));
                 }
 
 
-                outputData[outIdx] = finalColor.r;
-                outputData[outIdx + 1] = finalColor.g;
-                outputData[outIdx + 2] = finalColor.b;
+                outputData[outIdx] = finalR;
+                outputData[outIdx + 1] = finalG;
+                outputData[outIdx + 2] = finalB;
                 outputData[outIdx + 3] = 255;
             }
         }
