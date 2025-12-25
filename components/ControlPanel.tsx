@@ -1,20 +1,112 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ColorGroup } from '../types';
 
-// New component to handle the smooth sliding animation
+// --- Reusable UI Components ---
+
 const ExpandableInfoBox: React.FC<{ isOpen: boolean; children: React.ReactNode }> = ({ isOpen, children }) => (
-  <div 
-    className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-in-out ${
-      isOpen ? 'grid-rows-[1fr] opacity-100 mb-2' : 'grid-rows-[0fr] opacity-0 mb-0'
-    }`}
-  >
+  <div className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-in-out ${
+    isOpen ? 'grid-rows-[1fr] opacity-100 mb-2' : 'grid-rows-[0fr] opacity-0 mb-0'
+  }`}>
     <div className="overflow-hidden">
-      <div className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 shadow-sm mx-0.5">
+      <div className="px-2 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 shadow-sm">
         {children}
       </div>
     </div>
   </div>
 );
+
+interface SectionHeaderProps {
+  title: string;
+  isEnabled?: boolean;
+  onToggleEnabled?: () => void;
+  toggleDisabled?: boolean; // New prop to disable the toggle interaction without hiding it
+  infoKey?: string;
+  isInfoActive?: boolean;
+  onInfoToggle?: () => void;
+  rightElement?: React.ReactNode;
+  disabledStyle?: boolean;
+}
+
+const SectionHeader: React.FC<SectionHeaderProps> = ({ 
+  title, isEnabled, onToggleEnabled, toggleDisabled, infoKey, isInfoActive, onInfoToggle, rightElement, disabledStyle 
+}) => (
+  <div className="flex items-center gap-2 mb-2 border-b border-[#333]/5 pb-1">
+    {onToggleEnabled && (
+      <button 
+        onClick={toggleDisabled ? undefined : onToggleEnabled}
+        disabled={toggleDisabled}
+        className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out shrink-0 ${
+          toggleDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+        } ${isEnabled ? 'bg-slate-600' : 'bg-slate-300'}`}
+      >
+        <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${isEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+      </button>
+    )}
+    
+    <div className="flex items-center gap-2 flex-1 min-w-0">
+      <h3 className={`text-[11px] font-bold uppercase tracking-widest truncate ${disabledStyle ? 'text-gray-300' : 'text-gray-600'}`}>
+        {title}
+      </h3>
+      {infoKey && onInfoToggle && (
+        <button 
+          onClick={onInfoToggle} 
+          className={`transition-colors ${isInfoActive ? 'text-[#33569a]' : disabledStyle ? 'text-slate-300' : 'text-[#333]/40 hover:text-[#33569a]'}`}
+        >
+          <i className="fa-solid fa-circle-info"></i>
+        </button>
+      )}
+    </div>
+
+    {rightElement && <div className="shrink-0">{rightElement}</div>}
+  </div>
+);
+
+interface SliderControlProps {
+  label: string;
+  value: number;
+  max: number;
+  step: number;
+  onChange: (val: number) => void;
+  infoKey: string;
+  description: string;
+  isInfoOpen: boolean;
+  onInfoToggle: () => void;
+  unit?: string;
+}
+
+const SliderControl: React.FC<SliderControlProps> = ({ 
+  label, value, max, step, onChange, infoKey, description, isInfoOpen, onInfoToggle, unit 
+}) => {
+  // Logic fix: explicitly check against undefined so empty string "" is respected as "no unit"
+  const displayUnit = unit !== undefined ? unit : (max > 10 ? "%" : "px");
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
+        <div className="flex items-center gap-2">
+          <span>{label}</span>
+          <button 
+            onClick={onInfoToggle} 
+            className={`px-1 transition-colors ${isInfoOpen ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}
+          >
+            <i className="fa-solid fa-circle-info"></i>
+          </button>
+        </div>
+        <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">
+          {value === 0 ? "OFF" : `${value}${displayUnit}`}
+        </span>
+      </div>
+      <ExpandableInfoBox isOpen={isInfoOpen}>{description}</ExpandableInfoBox>
+      <input 
+        type="range" min="0" max={max} step={step} value={value} 
+        onChange={(e) => onChange(parseInt(e.target.value))} 
+        className="custom-slider" 
+      />
+    </div>
+  );
+};
+
+// --- Main Component ---
 
 interface ControlPanelProps {
   upscaleFactor: number | 'NS';
@@ -71,19 +163,16 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   disableScaling, setDisableScaling, disablePostProcessing, setDisablePostProcessing,
   disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle
 }) => {
-  // CHANGED: State is now a Set instead of a string to allow multiple open boxes
   const [activeInfos, setActiveInfos] = useState<Set<string>>(new Set());
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
   const [expandedSubcolors, setExpandedSubcolors] = useState<Set<string>>(new Set());
   const [subcolorLimit, setSubcolorLimit] = useState(16);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // CHANGED: Logic to add/remove keys from the Set
   const toggleInfo = (key: string) => {
     setActiveInfos(prev => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   };
@@ -127,8 +216,18 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     };
   }, [mobilePopup]);
 
+  // Config for Post Processing Sliders to map over
+  const cleanupControls = [
+    { label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
+    { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
+    { label: 'Corner Protection', val: vertexInertia, set: setVertexInertia, max: 100, step: 10, info: 'inertia', desc: 'Preserves sharp vertices.' },
+    { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' }
+  ];
+
   return (
     <div ref={panelRef} className="flex flex-col gap-6 pb-0">
+      
+      {/* 1. Upload Section */}
       <div className="border-b border-[#333]/10 pb-3">
         <label className={`flex flex-col items-center justify-center w-full h-14 border-2 border-dashed rounded-xl cursor-pointer transition-all group relative overflow-hidden ${image ? 'border-[#333]/10 bg-white hover:border-[#333]/30' : 'border-[#33569a]/30 bg-[#33569a]/5 hover:bg-[#33569a]/10 hover:border-[#33569a]/50'}`}>
           <div className="flex flex-row items-center gap-3 z-10">
@@ -141,23 +240,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </label>
       </div>
 
-      {/* Output Size Section */}
+      {/* 2. Output Size Section */}
       <div className="flex flex-col gap-0.25">
-        <div className="flex justify-between items-center mb-2 border-b border-[#333]/5 pb-1">
-          <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-bold uppercase tracking-widest ${disableScaling ? 'text-slate-300' : 'text-[#333]/40'}`}>Output Size</span>
-            <button onClick={() => toggleInfo('scale')} className={`transition-colors ${activeInfos.has('scale') ? 'text-[#33569a]' : 'text-[#333]/40 hover:text-[#33569a]'}`}><i className="fa-solid fa-circle-info"></i></button>
-          </div>
-          <span className={`font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px] ${disableScaling ? 'text-slate-300' : 'text-[#33569a]'}`}>{upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}</span>
-        </div>
+        <SectionHeader 
+          title="Output Size"
+          disabledStyle={disableScaling}
+          infoKey="scale"
+          isInfoActive={activeInfos.has('scale')}
+          onInfoToggle={() => toggleInfo('scale')}
+          rightElement={
+            <span className={`font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px] ${disableScaling ? 'text-slate-300' : 'text-[#33569a]'}`}>
+              {upscaleFactor === 'NS' ? 'AUTO' : `${upscaleFactor}X`}
+            </span>
+          }
+        />
 
-        {/* Animated Expandable InfoBox */}
         <ExpandableInfoBox isOpen={activeInfos.has('scale')}>
           {isSvg ? (
-            <>
-              <div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>
-              Scaling is disabled; SVGs maintain infinite resolution.
-            </>
+            <><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Scaling is disabled; SVGs maintain infinite resolution.</>
           ) : (
             "Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb."
           )}
@@ -171,15 +271,18 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* Cleanup & Quality Section */}
+      {/* 3. Cleanup & Quality Section */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2 mb-2 border-b border-[#333]/5 pb-1">
-          <button onClick={() => setDisablePostProcessing(!disablePostProcessing)} className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disablePostProcessing ? 'bg-[#333]' : 'bg-slate-300'}`}>
-            <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disablePostProcessing ? 'translate-x-4' : 'translate-x-0'}`} />
-          </button>
-          <span className={`text-[11px] font-bold uppercase tracking-widest flex-1 ${disablePostProcessing ? 'text-slate-300' : 'text-[#333]/40'}`}>Cleanup & Quality</span>
-          {isSvg && <button onClick={() => toggleInfo('svg-pp')} className={`transition-colors ml-auto ${activeInfos.has('svg-pp') ? 'text-amber-500' : 'text-amber-500/70 hover:text-amber-500'}`}><i className="fa-solid fa-circle-info"></i></button>}
-        </div>
+        <SectionHeader 
+          title="Cleanup & Quality"
+          isEnabled={!disablePostProcessing}
+          onToggleEnabled={() => setDisablePostProcessing(!disablePostProcessing)}
+          toggleDisabled={isSvg}
+          disabledStyle={disablePostProcessing || isSvg}
+          infoKey={isSvg ? 'svg-pp' : undefined}
+          isInfoActive={activeInfos.has('svg-pp')}
+          onInfoToggle={isSvg ? () => toggleInfo('svg-pp') : undefined}
+        />
 
         {isSvg && (
           <ExpandableInfoBox isOpen={activeInfos.has('svg-pp')}>
@@ -189,60 +292,58 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         )}
 
         <div className={`space-y-2 transition-opacity ${disablePostProcessing ? 'opacity-40 pointer-events-none' : ''}`}>
-          {[{ label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
-          { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
-          { label: 'Corner Protection', val: vertexInertia, set: setVertexInertia, max: 100, step: 10, info: 'inertia', desc: 'Preserves sharp vertices.' },
-          { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' }
-          ].map(s => (
-            <div key={s.label} className="space-y-0.5">
-              <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-                <div className="flex items-center gap-2">
-                  <span>{s.label}</span>
-                  <button onClick={() => toggleInfo(s.info)} className={`px-1 transition-colors ${activeInfos.has(s.info) ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}><i className="fa-solid fa-circle-info"></i></button>
-                </div>
-                <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{s.val === 0 ? "OFF" : s.val + (s.max > 10 ? "%" : "px")}</span>
-              </div>
-              <ExpandableInfoBox isOpen={activeInfos.has(s.info)}>
-                {s.desc}
-              </ExpandableInfoBox>
-              <input type="range" min="0" max={s.max} step={s.step} value={s.val} onChange={(e) => s.set(parseInt(e.target.value))} className="custom-slider" />
-            </div>
+          {cleanupControls.map(ctrl => (
+            <SliderControl
+              key={ctrl.label}
+              label={ctrl.label}
+              value={ctrl.val}
+              onChange={ctrl.set}
+              max={ctrl.max}
+              step={ctrl.step}
+              infoKey={ctrl.info}
+              description={ctrl.desc}
+              isInfoOpen={activeInfos.has(ctrl.info)}
+              onInfoToggle={() => toggleInfo(ctrl.info)}
+            />
           ))}
         </div>
       </div>
 
-      {/* Color Mapping Section */}
+      {/* 4. Color Mapping Section */}
       <div className="px-0.5">
-        <div className="flex items-center justify-between mb-2 border-b border-[#333]/5 pb-1">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setDisableRecoloring(!disableRecoloring)} className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${!disableRecoloring ? 'bg-[#333]' : 'bg-slate-300'}`}>
-              <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${!disableRecoloring ? 'translate-x-4' : 'translate-x-0'}`} />
-            </button>
-            <h3 className={`text-[11px] uppercase font-bold m-0 tracking-widest ${disableRecoloring ? 'text-slate-300' : 'text-[#333]/40'}`}>Color Mapping</h3>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={onRecomputeGroups} disabled={disableRecoloring || colorGroups.length === 0} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}><i className="fa-solid fa-arrows-rotate mr-1"></i> Recompute</button>
-            <button onClick={onAddManualLayer} disabled={disableRecoloring} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}><i className="fa-solid fa-plus mr-1"></i> Add</button>
-          </div>
-        </div>
-        
-        <div className={`space-y-0.5 mb-2 transition-opacity ${disableRecoloring ? 'opacity-40 pointer-events-none' : ''}`}>
-          <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-            <div className="flex items-center gap-2">
-              <span>Color Grouping</span>
-              <button onClick={() => toggleInfo('grouping')} className={`px-1 transition-colors ${activeInfos.has('grouping') ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}><i className="fa-solid fa-circle-info"></i></button>
+        <SectionHeader 
+          title="Color Mapping"
+          isEnabled={!disableRecoloring}
+          onToggleEnabled={() => setDisableRecoloring(!disableRecoloring)}
+          disabledStyle={disableRecoloring}
+          rightElement={
+            <div className="flex items-center gap-1">
+              <button onClick={onRecomputeGroups} disabled={disableRecoloring || colorGroups.length === 0} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}><i className="fa-solid fa-arrows-rotate mr-1"></i> Recompute</button>
+              <button onClick={onAddManualLayer} disabled={disableRecoloring} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 bg-white border border-[#333]/10 rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-[#33569a] ${disableRecoloring ? 'opacity-50 cursor-not-allowed' : ''}`}><i className="fa-solid fa-plus mr-1"></i> Add</button>
             </div>
-            <span className="text-[#33569a] font-mono bg-[#33569a]/10 px-1.5 py-0.5 rounded text-[10px]">{colorGroupingDistance}</span>
-          </div>
-          <ExpandableInfoBox isOpen={activeInfos.has('grouping')}>
-            Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups.
-          </ExpandableInfoBox>
-          <input type="range" min="5" max="100" step="5" value={colorGroupingDistance} onChange={(e) => setColorGroupingDistance(parseInt(e.target.value))} className="custom-slider" />
-        </div>
+          }
+        />
         
-        <p className="text-[10px] text-slate-500 leading-tight">Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.</p>
+        <div className={`transition-opacity ${disableRecoloring ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="mb-2">
+             <SliderControl
+                label="Color Grouping"
+                value={colorGroupingDistance}
+                max={100}
+                step={5}
+                onChange={setColorGroupingDistance}
+                infoKey="grouping"
+                description="Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups."
+                isInfoOpen={activeInfos.has('grouping')}
+                onInfoToggle={() => toggleInfo('grouping')}
+                unit="" // Passing empty string explicitly for "no unit"
+              />
+          </div>
+          <p className="text-[10px] text-slate-500 leading-tight">Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.</p>
+        </div>
       </div>
 
+      {/* 5. Color Groups List (Logic heavy, keeping inline but clean) */}
       <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
         {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
