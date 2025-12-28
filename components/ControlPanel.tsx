@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ColorGroup, PixelArtConfig } from '../types';
+import { ColorGroup, PixelArtConfig, RecolorMode, TintSettings } from '../types';
 import { DualNumberInput } from './DualNumberInput';
+import { hslToRgb, rgbToHex } from '../utils/colorUtils';
 
 // --- Reusable UI Components ---
 
 const ExpandableInfoBox: React.FC<{ isOpen: boolean; children: React.ReactNode }> = ({ isOpen, children }) => (
-  <div className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-in-out ${
-    isOpen ? 'grid-rows-[1fr] opacity-100 mb-2' : 'grid-rows-[0fr] opacity-0 mb-0'
-  }`}>
+  <div className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] opacity-100 mb-2' : 'grid-rows-[0fr] opacity-0 mb-0'
+    }`}>
     <div className="overflow-hidden">
       <div className="px-2 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-sm leading-relaxed text-slate-600 shadow-sm">
         {children}
@@ -28,29 +28,28 @@ interface SectionHeaderProps {
   disabledStyle?: boolean;
 }
 
-const SectionHeader: React.FC<SectionHeaderProps> = ({ 
-  title, isEnabled, onToggleEnabled, toggleDisabled, infoKey, isInfoActive, onInfoToggle, rightElement, disabledStyle 
+const SectionHeader: React.FC<SectionHeaderProps> = ({
+  title, isEnabled, onToggleEnabled, toggleDisabled, infoKey, isInfoActive, onInfoToggle, rightElement, disabledStyle
 }) => (
   <div className="flex items-center gap-2 mb-2 border-b border-[#333]/5 pb-1">
     {onToggleEnabled && (
-      <button 
+      <button
         onClick={toggleDisabled ? undefined : onToggleEnabled}
         disabled={toggleDisabled}
-        className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out shrink-0 ${
-          toggleDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-        } ${isEnabled ? 'bg-slate-600' : 'bg-slate-300'}`}
+        className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ease-in-out shrink-0 ${toggleDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+          } ${isEnabled ? 'bg-slate-600' : 'bg-slate-300'}`}
       >
         <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${isEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
       </button>
     )}
-    
+
     <div className="flex items-center gap-2 flex-1 min-w-0">
       <h3 className={`text-[11px] font-bold uppercase tracking-widest truncate ${disabledStyle ? 'text-gray-300' : 'text-gray-600'}`}>
         {title}
       </h3>
       {infoKey && onInfoToggle && (
-        <button 
-          onClick={onInfoToggle} 
+        <button
+          onClick={onInfoToggle}
           className={`transition-colors ${isInfoActive ? 'text-[#33569a]' : disabledStyle ? 'text-slate-300' : 'text-[#333]/40 hover:text-[#33569a]'}`}
         >
           <i className="fa-solid fa-circle-info"></i>
@@ -75,8 +74,8 @@ interface SliderControlProps {
   unit?: string;
 }
 
-const SliderControl: React.FC<SliderControlProps> = ({ 
-  label, value, max, step, onChange, infoKey, description, isInfoOpen, onInfoToggle, unit 
+const SliderControl: React.FC<SliderControlProps> = ({
+  label, value, max, step, onChange, infoKey, description, isInfoOpen, onInfoToggle, unit
 }) => {
   const displayUnit = unit !== undefined ? unit : (max > 10 ? "%" : "px");
 
@@ -85,8 +84,8 @@ const SliderControl: React.FC<SliderControlProps> = ({
       <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
         <div className="flex items-center gap-2">
           <span>{label}</span>
-          <button 
-            onClick={onInfoToggle} 
+          <button
+            onClick={onInfoToggle}
             className={`px-1 transition-colors ${isInfoOpen ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}
           >
             <i className="fa-solid fa-circle-info"></i>
@@ -97,10 +96,10 @@ const SliderControl: React.FC<SliderControlProps> = ({
         </span>
       </div>
       <ExpandableInfoBox isOpen={isInfoOpen}>{description}</ExpandableInfoBox>
-      <input 
-        type="range" min="0" max={max} step={step} value={value} 
-        onChange={(e) => onChange(parseInt(e.target.value))} 
-        className="custom-slider" 
+      <input
+        type="range" min="0" max={max} step={step} value={value}
+        onChange={(e) => onChange(parseInt(e.target.value))}
+        className="custom-slider"
       />
     </div>
   );
@@ -158,6 +157,11 @@ interface ControlPanelProps {
   onMobileViewToggle: (id: string, type: 'group' | 'color') => void;
   pixelArtConfig: PixelArtConfig;
   setPixelArtConfig: (v: PixelArtConfig | ((prev: PixelArtConfig) => PixelArtConfig)) => void;
+  recolorMode: RecolorMode;
+  setRecolorMode: (v: RecolorMode) => void;
+  tintOverrides: Record<string, TintSettings>;
+  setTintOverrides: React.Dispatch<React.SetStateAction<Record<string, TintSettings>>>;
+  setTintModalGroupId: (id: string | null) => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -171,7 +175,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   paletteLength,
   disableScaling, setDisableScaling, disablePostProcessing, setDisablePostProcessing,
   disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle,
-  pixelArtConfig, setPixelArtConfig
+  pixelArtConfig, setPixelArtConfig,
+  recolorMode, setRecolorMode, tintOverrides, setTintOverrides, setTintModalGroupId
 }) => {
   const [activeInfos, setActiveInfos] = useState<Set<string>>(new Set());
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
@@ -245,7 +250,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
   return (
     <div ref={panelRef} className="flex flex-col gap-6 pb-0">
-      
+
       {/* 1. Upload Section */}
       <div className="border-b border-[#333]/10 pb-3">
         <label className={`flex flex-col items-center justify-center w-full h-14 border-2 border-dashed rounded-xl cursor-pointer transition-all group relative overflow-hidden ${image ? 'border-[#333]/10 bg-white hover:border-[#333]/30' : 'border-[#33569a]/30 bg-[#33569a]/5 hover:bg-[#33569a]/10 hover:border-[#33569a]/50'}`}>
@@ -261,7 +266,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
       {/* 2. Output Size Section */}
       <div className="flex flex-col gap-0.25">
-        <SectionHeader 
+        <SectionHeader
           title="Output Size"
           disabledStyle={disableScaling}
           infoKey="scale"
@@ -278,7 +283,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           {isSvg ? (
             <><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Scaling is disabled; SVGs maintain infinite resolution.</>
           ) : pixelArtConfig.enabled ? (
-            <><div className="flex items-center gap-2 text-blue-600 font-bold mb-1"><i className="fa-solid fa-cube"></i><span>Pixel Art Mode Active</span></div> Scale value is used as maximum dimension. The largest integer scale that fits will be applied.</>  ) : (
+            <><div className="flex items-center gap-2 text-blue-600 font-bold mb-1"><i className="fa-solid fa-cube"></i><span>Pixel Art Mode Active</span></div> Scale value is used as maximum dimension. The largest integer scale that fits will be applied.</>) : (
             "Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb."
           )}
         </ExpandableInfoBox>
@@ -293,7 +298,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
       {/* 3. Cleanup & Quality Section */}
       <div className="space-y-2">
-        <SectionHeader 
+        <SectionHeader
           title="Cleanup & Quality"
           isEnabled={!disablePostProcessing}
           onToggleEnabled={() => setDisablePostProcessing(!disablePostProcessing)}
@@ -335,7 +340,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* 4. Transparency Section */}
       {image && hasTransparency && !isSvg && (
         <div className="space-y-2">
-          <SectionHeader 
+          <SectionHeader
             title="Transparency"
             isEnabled={preserveTransparency}
             onToggleEnabled={() => setPreserveTransparency(!preserveTransparency)}
@@ -370,7 +375,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* 5. Pixel Art Mode Section */}
       {image && !isSvg && (
         <div className="space-y-2">
-          <SectionHeader 
+          <SectionHeader
             title="Pixel Art Mode"
             isEnabled={pixelArtConfig.enabled}
             onToggleEnabled={() => {
@@ -388,7 +393,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <ExpandableInfoBox isOpen={activeInfos.has('pixelart')}>
             Reduces image to distinct pixels by sampling majority color in each block.
           </ExpandableInfoBox>
-            
+
           {pixelArtConfig.enabled && (
             <div className="space-y-2">
               {/* Pixel Size */}
@@ -496,8 +501,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
               {/* Show Grid Checkbox */}
               <label className="flex items-center gap-2 text-[10px] text-[#333] cursor-pointer">
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   checked={pixelArtConfig.showGrid}
                   onChange={(e) => setPixelArtConfig(prev => ({ ...prev, showGrid: e.target.checked }))}
                   className="w-3 h-3"
@@ -511,7 +516,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
       {/* 6. Color Mapping Section */}
       <div className="px-0.5">
-        <SectionHeader 
+        <SectionHeader
           title="Color Mapping"
           isEnabled={!disableRecoloring}
           onToggleEnabled={() => setDisableRecoloring(!disableRecoloring)}
@@ -523,23 +528,66 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
           }
         />
-        
+
         <div className={`transition-opacity ${disableRecoloring ? 'opacity-40 pointer-events-none' : ''}`}>
-          <div className="mb-2">
-             <SliderControl
-                label="Color Grouping"
-                value={colorGroupingDistance}
-                max={100}
-                step={5}
-                onChange={setColorGroupingDistance}
-                infoKey="grouping"
-                description="Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups."
-                isInfoOpen={activeInfos.has('grouping')}
-                onInfoToggle={() => toggleInfo('grouping')}
-                unit="" 
-              />
+          {/* Mode Switcher */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between text-[10px] font-bold text-[#333] uppercase tracking-wide mb-1.5">
+              <div className="flex items-center gap-2">
+                <span>Recolor Mode</span>
+                <button
+                  onClick={() => toggleInfo('recolormode')}
+                  className={`px-1 transition-colors ${activeInfos.has('recolormode') ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}
+                >
+                  <i className="fa-solid fa-circle-info"></i>
+                </button>
+              </div>
+            </div>
+            <ExpandableInfoBox isOpen={activeInfos.has('recolormode')}>
+              <strong>Palette:</strong> Replace each color group with a specific target color.<br />
+              <strong>Hue Tint:</strong> Shift all colors in a group to a new hue while preserving their original lightness and saturation variations.
+            </ExpandableInfoBox>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                onClick={() => setRecolorMode('palette')}
+                className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${recolorMode === 'palette'
+                  ? 'bg-[#333] text-white border-[#333] shadow-md'
+                  : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+              >
+                <i className="fa-solid fa-palette mr-1"></i> Palette
+              </button>
+              <button
+                onClick={() => setRecolorMode('tint')}
+                className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${recolorMode === 'tint'
+                  ? 'bg-[#333] text-white border-[#333] shadow-md'
+                  : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+              >
+                <i className="fa-solid fa-droplet mr-1"></i> Hue Tint
+              </button>
+            </div>
           </div>
-          <p className="text-[10px] text-slate-500 leading-tight">Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.</p>
+
+          <div className="mb-2">
+            <SliderControl
+              label="Color Grouping"
+              value={colorGroupingDistance}
+              max={100}
+              step={5}
+              onChange={setColorGroupingDistance}
+              infoKey="grouping"
+              description="Controls how similar colors must be to group together. Lower values create more groups with tighter color ranges; higher values merge similar colors into fewer groups."
+              isInfoOpen={activeInfos.has('grouping')}
+              onInfoToggle={() => toggleInfo('grouping')}
+              unit=""
+            />
+          </div>
+          <p className="text-[10px] text-slate-500 leading-tight">
+            {recolorMode === 'palette'
+              ? 'Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.'
+              : 'Adjust the hue slider to shift all colors in a group while preserving their lightness/saturation.'}
+          </p>
         </div>
       </div>
 
@@ -558,75 +606,105 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           const isDropTarget = draggedItem && draggedItem.groupId !== id;
           const isGroupViewActive = mobileViewTarget?.id === id && mobileViewTarget?.type === 'group';
           const isSubcolorsExpanded = expandedSubcolors.has(id);
+          const currentTint = tintOverrides[id];
+          const hasTintOverride = currentTint !== undefined;
+          // Compute preview color for tint swatch
+
+          const tintPreviewHex = hasTintOverride
+            ? (() => {
+              const s = Math.max(0, Math.min(100, 70 + (currentTint.saturation || 0) * 0.3));
+              const l = Math.max(0, Math.min(100, 50 + (currentTint.lightness || 0) * 0.5));
+              const rgb = hslToRgb(currentTint.hue, s, l);
+              return rgbToHex(rgb.r, rgb.g, rgb.b);
+            })()
+            : null;
           const sortedMembers = [...members].sort((a, b) => b.count - a.count);
           const visibleMembers = isSubcolorsExpanded ? sortedMembers : sortedMembers.slice(0, subcolorLimit);
           const hiddenCount = sortedMembers.length - subcolorLimit;
 
           return (
             <div key={id} className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'} ${isDropTarget ? 'ring-2 ring-[#33569a] bg-[#33569a]/5' : ''} ${isGroupViewActive ? 'ring-2 ring-[#33569a]/50 bg-blue-50' : ''}`}
-              draggable={!isManual}
-              onDragStart={(e) => { if (!isManual) { setDraggedItem({ type: 'group', groupId: id }); e.dataTransfer.effectAllowed = 'move'; } }}
-              onDragEnd={() => setDraggedItem(null)}
               onDragOver={(e) => { if (draggedItem && draggedItem.groupId !== id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
               onDrop={(e) => { e.preventDefault(); if (!draggedItem) return; if (draggedItem.type === 'color' && draggedItem.colorHex) onMoveColor(draggedItem.colorHex, draggedItem.groupId, id); else if (draggedItem.type === 'group') onMergeGroups(draggedItem.groupId, id); setDraggedItem(null); }}
-              onMouseEnter={() => setHoveredGroupId(id)}
-              onMouseLeave={() => setHoveredGroupId(null)}
             >
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2 cursor-move"
+                draggable
+                onDragStart={(e) => { setDraggedItem({ type: 'group', groupId: id }); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragEnd={() => setDraggedItem(null)}
+                onMouseEnter={() => setHoveredGroupId(id)}
+                onMouseLeave={() => setHoveredGroupId(null)}
+              >
                 <input type="checkbox" checked={isEnabled} onChange={() => { setEnabledGroups(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; }); }} className="w-3 h-3 rounded border-slate-300 accent-[#333] cursor-pointer shrink-0" />
-                <div className="flex-1 flex items-center gap-2 min-w-0">
-                  <button onClick={() => onEditTarget(id, 'original')} className="flex-1 h-6 rounded-lg border border-black/5 shadow-inner relative group/btn overflow-hidden transition-transform active:scale-[0.98]" style={{ backgroundColor: currentOriginal }} title={`Group Area: ${groupPercent}% - Click to change anchor color`}>
+                <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
+                  <button onClick={() => onEditTarget(id, 'original')} className={`h-6 rounded-lg border border-black/5 shadow-inner relative group/btn overflow-hidden transition-transform active:scale-[0.98] flex-1`} style={{ backgroundColor: currentOriginal }} title={`Group Area:${groupPercent}% - Click to change anchor color`}>
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/btn:opacity-100 bg-black/10 transition-opacity"><span className="text-[8px] font-mono font-bold text-white drop-shadow-md bg-black/30 px-1 py-0.5 rounded backdrop-blur-[1px]">{currentOriginal.toUpperCase()}</span></div>
                     <div className="absolute top-0 right-0 px-1 text-[7px] font-bold text-black/40 bg-white/40 rounded-bl-md backdrop-blur-[1px]">{groupPercent}%</div>
                   </button>
                   <i className="fa-solid fa-chevron-right text-[9px] text-slate-300 shrink-0"></i>
-                  <button onClick={() => onEditTarget(id, 'recolor')} className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] ${targetRecolor ? 'border-[#333]/20 shadow-sm' : 'border-dashed border-slate-300 hover:border-slate-400 bg-slate-50'}`} style={{ backgroundColor: targetRecolor || 'transparent' }} title="Target Color (Optional)">{!targetRecolor && <i className="fa-solid fa-eye-dropper text-[9px] text-slate-300"></i>}</button>
+                  {recolorMode === 'palette' && (
+                    <button onClick={() => onEditTarget(id, 'recolor')} className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] ${targetRecolor ? 'border-[#333]/20 shadow-sm' : 'border-dashed border-slate-300 hover:border-slate-400 bg-slate-50'}`} style={{ backgroundColor: targetRecolor || 'transparent' }} title="Target Color (Optional)">{!targetRecolor && <i className="fa-solid fa-eye-dropper text-[9px] text-slate-300"></i>}</button>
+                  )}
+                  {recolorMode === 'tint' && (
+                    <button
+                      onClick={() => setTintModalGroupId(id)}
+                      className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] ${hasTintOverride ? 'border-[#333]/20 shadow-sm' : 'border-dashed border-slate-300 hover:border-slate-400 bg-slate-50'}`}
+                      style={{ backgroundColor: tintPreviewHex || 'transparent' }}
+                      title={hasTintOverride ? `Tint: ${currentTint.hue}° (click to edit)` : 'Click to add tint'}
+                    >
+                      {!hasTintOverride && <i className="fa-solid fa-droplet text-[9px] text-slate-300"></i>}
+                    </button>
+                  )}
                 </div>
                 <button onClick={(e) => { if (isTouchDevice) { e.stopPropagation(); onMobileViewToggle(id, 'group'); } else { setHoveredGroupId(hoveredGroupId === id ? null : id); } }} className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors shrink-0 ${(hoveredGroupId === id || isGroupViewActive) ? 'bg-[#33569a] text-white' : 'text-slate-300 hover:text-[#33569a] hover:bg-[#33569a]/10'}`} title="View in Image"><i className="fa-solid fa-eye text-[9px]"></i></button>
-                {isTouchDevice && !isManual && (
+                {isTouchDevice && (
                   <button onClick={(e) => { e.stopPropagation(); if (draggedItem && draggedItem.groupId !== id) { if (draggedItem.type === 'group') onMergeGroups(draggedItem.groupId, id); else if (draggedItem.colorHex) onMoveColor(draggedItem.colorHex, draggedItem.groupId, id); setDraggedItem(null); } else if (draggedItem?.groupId === id) setDraggedItem(null); else setDraggedItem({ type: 'group', groupId: id }); }} className={`w-5 h-5 flex items-center justify-center rounded-full transition-all shrink-0 ${draggedItem?.groupId === id ? 'bg-[#33569a] text-white scale-110' : draggedItem && draggedItem.groupId !== id ? 'bg-[#33569a]/10 text-[#33569a] ring-2 ring-[#33569a]/30' : 'text-slate-300 active:text-[#33569a]'}`} title={draggedItem?.groupId === id ? 'Tap to deselect' : draggedItem ? 'Tap to merge here' : 'Tap to select for moving'}><i className={`fa-solid ${draggedItem?.groupId === id ? 'fa-check' : draggedItem ? 'fa-arrow-down' : 'fa-grip-vertical'} text-[9px]`}></i></button>
                 )}
                 {isManual && <button onClick={() => onRemoveManualLayer(id)} className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors shrink-0"><i className="fa-solid fa-times text-[9px]"></i></button>}
               </div>
-              {members.length > 1 && (
-                <div className="flex flex-col gap-2 px-5 pb-1 relative">
-                  <div className="flex flex-wrap gap-1">
-                    {visibleMembers.map(member => {
-                      const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
-                      const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
-                      const isSubcolorActive = mobileViewTarget?.id === member.hex && mobileViewTarget?.type === 'color';
-                      return (
-                        <div key={member.hex} className="relative">
-                          <button draggable={!isTouchDevice} onDragStart={(e) => { setDraggedItem({ type: 'color', colorHex: member.hex, groupId: id }); e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); }} onDragEnd={() => setDraggedItem(null)} onClick={(e) => { e.stopPropagation(); if (isTouchDevice) setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent }); else onMoveColor(member.hex, id, 'new'); }} onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)} onMouseLeave={() => !isTouchDevice && setHoveredColor(null)} className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member ${isPopupOpen || isSubcolorActive ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`} style={{ backgroundColor: member.hex }} title={`${member.hex} (${memberPercent}%)`}>
-                            {isSubcolorActive && <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-full animate-in zoom-in duration-200"><i className="fa-solid fa-check text-[8px] text-white drop-shadow-md"></i></div>}
-                            {!isTouchDevice && <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full"><i className="fa-solid fa-grip-vertical text-[6px] text-white drop-shadow-md"></i></div>}
-                          </button>
-                          {isPopupOpen && (
-                            <div className="mobile-color-popup absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 min-w-[120px]">
-                              <div className="text-center mb-2"><div className="w-8 h-8 rounded-full mx-auto border-2 border-black/10 shadow-inner" style={{ backgroundColor: member.hex }}></div><div className="text-[9px] font-mono font-bold text-[#333] mt-1">{member.hex.toUpperCase()}</div><div className="text-[8px] text-slate-400">{memberPercent}%</div></div>
-                              <div className="flex flex-col gap-1">
-                                <button onClick={() => { onMobileViewToggle(member.hex, 'color'); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"><i className="fa-solid fa-eye text-[#33569a]"></i><span>View in Image</span></button>
-                                <button onClick={() => { onMoveColor(member.hex, id, 'new'); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"><i className="fa-solid fa-arrow-up-right-from-square text-[#33569a]"></i><span>Ungroup Color</span></button>
-                                <div className="border-t border-slate-100 pt-1 mt-1"><div className="text-[7px] uppercase text-slate-400 font-bold mb-1 px-2">Move to group</div>
-                                  {colorGroups.filter(g => g.id !== id).slice(0, 4).map((target) => (
-                                    <button key={target.id} onClick={() => { onMoveColor(member.hex, id, target.id); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded text-left w-full">
-                                      <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0]?.hex }} />
-                                      <span className="text-[8px] text-slate-600 truncate">Group {colorGroups.findIndex(g => g.id === target.id) + 1}</span>
-                                    </button>
-                                  ))}
+              {/* Tint info badge - click to edit */}
+              {/* Tint info badge removed for consistency with palette mode */}
+              {
+                members.length > 1 && (
+                  <div className="flex flex-col gap-2 px-5 pb-1 relative">
+                    <div className="flex flex-wrap gap-1">
+                      {visibleMembers.map(member => {
+                        const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
+                        const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
+                        const isSubcolorActive = mobileViewTarget?.id === member.hex && mobileViewTarget?.type === 'color';
+                        return (
+                          <div key={member.hex} className="relative">
+                            <button draggable={!isTouchDevice} onDragStart={(e) => { setDraggedItem({ type: 'color', colorHex: member.hex, groupId: id }); e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); }} onDragEnd={() => setDraggedItem(null)} onClick={(e) => { e.stopPropagation(); if (isTouchDevice) setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent }); else onMoveColor(member.hex, id, 'new'); }} onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)} onMouseLeave={() => !isTouchDevice && setHoveredColor(null)} className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member ${isPopupOpen || isSubcolorActive ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`} style={{ backgroundColor: member.hex }} title={`${member.hex} (${memberPercent}%)`}>
+                              {isSubcolorActive && <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-full animate-in zoom-in duration-200"><i className="fa-solid fa-check text-[8px] text-white drop-shadow-md"></i></div>}
+                              {!isTouchDevice && <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full"><i className="fa-solid fa-grip-vertical text-[6px] text-white drop-shadow-md"></i></div>}
+                            </button>
+                            {isPopupOpen && (
+                              <div className="mobile-color-popup absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 min-w-[120px]">
+                                <div className="text-center mb-2"><div className="w-8 h-8 rounded-full mx-auto border-2 border-black/10 shadow-inner" style={{ backgroundColor: member.hex }}></div><div className="text-[9px] font-mono font-bold text-[#333] mt-1">{member.hex.toUpperCase()}</div><div className="text-[8px] text-slate-400">{memberPercent}%</div></div>
+                                <div className="flex flex-col gap-1">
+                                  <button onClick={() => { onMobileViewToggle(member.hex, 'color'); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"><i className="fa-solid fa-eye text-[#33569a]"></i><span>View in Image</span></button>
+                                  <button onClick={() => { onMoveColor(member.hex, id, 'new'); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"><i className="fa-solid fa-arrow-up-right-from-square text-[#33569a]"></i><span>Ungroup Color</span></button>
+                                  <div className="border-t border-slate-100 pt-1 mt-1"><div className="text-[7px] uppercase text-slate-400 font-bold mb-1 px-2">Move to group</div>
+                                    {colorGroups.filter(g => g.id !== id).slice(0, 4).map((target) => (
+                                      <button key={target.id} onClick={() => { onMoveColor(member.hex, id, target.id); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded text-left w-full">
+                                        <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0]?.hex }} />
+                                        <span className="text-[8px] text-slate-600 truncate">Group {colorGroups.findIndex(g => g.id === target.id) + 1}</span>
+                                      </button>
+                                    ))}
+                                  </div>
                                 </div>
+                                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full"><div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-white"></div></div>
                               </div>
-                              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full"><div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-white"></div></div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {hiddenCount > 0 && !isSubcolorsExpanded && <button onClick={(e) => { e.stopPropagation(); toggleSubcolorExpansion(id); }} className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"><i className="fa-solid fa-angle-down"></i> Show {hiddenCount} More</button>}
+                    {isSubcolorsExpanded && sortedMembers.length > subcolorLimit && <button onClick={(e) => { e.stopPropagation(); toggleSubcolorExpansion(id); }} className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"><i className="fa-solid fa-angle-up"></i> Show Less</button>}
                   </div>
-                  {hiddenCount > 0 && !isSubcolorsExpanded && <button onClick={(e) => { e.stopPropagation(); toggleSubcolorExpansion(id); }} className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"><i className="fa-solid fa-angle-down"></i> Show {hiddenCount} More</button>}
-                  {isSubcolorsExpanded && sortedMembers.length > subcolorLimit && <button onClick={(e) => { e.stopPropagation(); toggleSubcolorExpansion(id); }} className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"><i className="fa-solid fa-angle-up"></i> Show Less</button>}
-                </div>
-              )}
+                )
+              }
             </div>
           );
         })}

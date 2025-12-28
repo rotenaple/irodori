@@ -1,4 +1,4 @@
-import { ColorRGB, PaletteColor, ColorGroup, ColorInstance } from '../types';
+import { ColorRGB, PaletteColor, ColorGroup, ColorInstance, TintSettings } from '../types';
 
 export const rgbToHex = (r: number, g: number, b: number): string => {
   const componentToHex = (c: number) => {
@@ -78,6 +78,144 @@ export const hexToHsl = (hex: string): { h: number; s: number; l: number } | nul
 export const hslToHex = (h: number, s: number, l: number): string => {
   const rgb = hslToRgb(h, s, l);
   return rgbToHex(rgb.r, rgb.g, rgb.b);
+};
+
+// --- Hue Tint Mode Utilities ---
+
+/**
+ * Calculate the shortest distance between two hues on the color wheel (0-360).
+ * Returns a value between 0 and 180.
+ */
+export const getHueDistance = (h1: number, h2: number): number => {
+  const diff = Math.abs(h1 - h2);
+  return Math.min(diff, 360 - diff);
+};
+
+/**
+ * Calculate the signed hue difference (h2 - h1) taking the shortest path.
+ * Returns a value between -180 and 180.
+ */
+export const getHueDifference = (h1: number, h2: number): number => {
+  let diff = h2 - h1;
+  // Normalize to shortest path
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return diff;
+};
+
+/**
+ * Shift a hue by a given amount, wrapping around 0-360.
+ */
+export const shiftHue = (h: number, shift: number): number => {
+  let result = h + shift;
+  while (result < 0) result += 360;
+  while (result >= 360) result -= 360;
+  return result;
+};
+
+/**
+ * Apply a hue shift to a color while preserving saturation and lightness.
+ * @param hex - The source color in hex format
+ * @param baseHue - The reference hue of the color group (0-360)
+ * @param targetHue - The target hue to shift to (0-360)
+ * @returns The shifted color in hex format
+ */
+export const applyHueTint = (hex: string, baseHue: number, targetHue: number): string => {
+  const hsl = hexToHsl(hex);
+  if (!hsl) return hex;
+  
+  // For achromatic colors (very low saturation), optionally add saturation
+  // or return unchanged - we'll preserve them unchanged for now
+  if (hsl.s < 5) {
+    return hex;
+  }
+  
+  // Calculate the hue offset from the group's base hue
+  const hueOffset = getHueDifference(baseHue, hsl.h);
+  
+  // Apply the same offset to the target hue
+  const newHue = shiftHue(targetHue, hueOffset);
+  
+  return hslToHex(newHue, hsl.s, hsl.l);
+};
+
+/**
+ * Apply full tint settings to a hex color.
+ * Includes hue shift, saturation adjustment, lightness adjustment, and force.
+ */
+export const applyTintToHex = (hex: string, baseHue: number, tint: TintSettings): string => {
+  const hsl = hexToHsl(hex);
+  if (!hsl) return hex;
+  
+  // For achromatic colors (very low saturation), only apply lightness
+  if (hsl.s < 5) {
+    const lForce = tint.lightnessForce / 100;
+    const adjustedL = Math.max(0, Math.min(100, hsl.l + tint.lightness * lForce));
+    return hslToHex(hsl.h, hsl.s, adjustedL);
+  }
+  
+  // Calculate the hue offset from the group's base hue
+  const hueOffset = getHueDifference(baseHue, hsl.h);
+  
+  // Apply the same offset to the target hue
+  const targetHue = shiftHue(tint.hue, hueOffset);
+  
+  // Apply individual force values for H, S, L
+  const hForce = tint.hueForce / 100;
+  const sForce = tint.saturationForce / 100;
+  const lForce = tint.lightnessForce / 100;
+  
+  // Blend hue based on hueForce
+  const newHue = hForce < 1 ? hsl.h + (targetHue - hsl.h) * hForce : targetHue;
+  
+  // Apply saturation shift with saturationForce
+  const saturationShift = tint.saturation * sForce;
+  const newS = Math.max(0, Math.min(100, hsl.s + saturationShift));
+  
+  // Apply lightness shift with lightnessForce
+  const lightnessShift = tint.lightness * lForce;
+  const newL = Math.max(0, Math.min(100, hsl.l + lightnessShift));
+  
+  return hslToHex(newHue, newS, newL);
+};
+
+/**
+ * Calculate the average hue of a color group, weighted by pixel count.
+ * Uses circular mean to handle the wrap-around at 0/360.
+ */
+export const calculateGroupBaseHue = (members: ColorInstance[]): number => {
+  let sinSum = 0;
+  let cosSum = 0;
+  let totalWeight = 0;
+  
+  for (const member of members) {
+    const hsl = hexToHsl(member.hex);
+    if (!hsl || hsl.s < 5) continue; // Skip achromatic colors
+    
+    const radians = (hsl.h * Math.PI) / 180;
+    const weight = member.count;
+    sinSum += Math.sin(radians) * weight;
+    cosSum += Math.cos(radians) * weight;
+    totalWeight += weight;
+  }
+  
+  if (totalWeight === 0) {
+    // All colors are achromatic, return 0 as default
+    return 0;
+  }
+  
+  let avgHue = Math.atan2(sinSum / totalWeight, cosSum / totalWeight) * (180 / Math.PI);
+  if (avgHue < 0) avgHue += 360;
+  
+  return avgHue;
+};
+
+/**
+ * Check if a color is achromatic (grayscale).
+ */
+export const isAchromatic = (hex: string, threshold: number = 5): boolean => {
+  const hsl = hexToHsl(hex);
+  return !hsl || hsl.s < threshold;
 };
 
 export const getColorDistance = (c1: ColorRGB, c2: ColorRGB): number => {
@@ -311,18 +449,52 @@ const processFrequencyMap = (frequencyMap: Record<string, number>, totalSamples:
   };
 };
 
-export const recolorSvg = (svgContent: string, colorGroups: ColorGroup[], colorOverrides: Record<string, string>): string => {
+export const recolorSvg = (
+  svgContent: string, 
+  colorGroups: ColorGroup[], 
+  colorOverrides: Record<string, string>,
+  recolorMode: 'palette' | 'tint' = 'palette',
+  tintOverrides?: Record<string, TintSettings>
+): string => {
   // Create a mapping from any found color string to its new target hex
   const colorToTarget: Record<string, string> = {};
+  // For tint mode, we also need to track which group each color belongs to
+  const colorToGroupInfo: Record<string, { baseHue: number, tint: TintSettings }> = {};
 
   for (const group of colorGroups) {
-    const target = colorOverrides[group.id];
-    if (target) {
-      for (const member of group.members) {
-        colorToTarget[member.hex.toLowerCase()] = target;
+    if (recolorMode === 'tint' && tintOverrides) {
+      // Tint mode: use tint settings
+      const tint = tintOverrides[group.id];
+      if (tint !== undefined) {
+        const baseHue = group.baseHue ?? calculateGroupBaseHue(group.members);
+        for (const member of group.members) {
+          colorToGroupInfo[member.hex.toLowerCase()] = { baseHue, tint };
+        }
+      }
+    } else {
+      // Palette mode: direct color replacement
+      const target = colorOverrides[group.id];
+      if (target) {
+        for (const member of group.members) {
+          colorToTarget[member.hex.toLowerCase()] = target;
+        }
       }
     }
   }
+
+  // Helper to apply transformation based on mode
+  const transformColor = (hex: string): string => {
+    const lowerHex = hex.toLowerCase();
+    if (recolorMode === 'tint') {
+      const groupInfo = colorToGroupInfo[lowerHex];
+      if (groupInfo) {
+        return applyTintToHex(lowerHex, groupInfo.baseHue, groupInfo.tint);
+      }
+      return hex;
+    } else {
+      return colorToTarget[lowerHex] || hex;
+    }
+  };
 
   // Replace hex colors
   let newSvg = svgContent.replace(/#(?:[0-9a-fA-F]{3}){1,2}\b/g, (match) => {
@@ -330,13 +502,13 @@ export const recolorSvg = (svgContent: string, colorGroups: ColorGroup[], colorO
     if (hex.length === 4) {
       hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
     }
-    return colorToTarget[hex] || match;
+    return transformColor(hex);
   });
 
   // Replace rgb colors
   newSvg = newSvg.replace(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/g, (match, r, g, b) => {
     const hex = rgbToHex(parseInt(r), parseInt(g), parseInt(b));
-    return colorToTarget[hex] || match;
+    return transformColor(hex);
   });
 
   // Replace named colors
@@ -347,8 +519,11 @@ export const recolorSvg = (svgContent: string, colorGroups: ColorGroup[], colorO
 
   newSvg = newSvg.replace(/((?:fill|stroke|stop-color|color)\s*[:=]\s*["']?)([a-zA-Z]+)(["']?)/g, (match, prefix, name, suffix) => {
     const hex = nameToHex[name.toLowerCase()];
-    if (hex && colorToTarget[hex]) {
-      return prefix + colorToTarget[hex] + suffix;
+    if (hex) {
+      const transformed = transformColor(hex);
+      if (transformed !== hex) {
+        return prefix + transformed + suffix;
+      }
     }
     return match;
   });

@@ -418,16 +418,12 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                 && layoutDims?.width
                 && layoutDims?.height
                 && (
-                  <div 
-                    className="absolute inset-0 pointer-events-none z-10"
-                    style={{
-                      backgroundImage: `
-                        linear-gradient(to right, rgba(0,0,0,0.3) 1px, transparent 1px),
-                        linear-gradient(to bottom, rgba(0,0,0,0.3) 1px, transparent 1px)
-                      `,
-                      backgroundSize: `${(layoutDims?.width || 0) * pixelArtConfig.pixelWidth / activeImageDims.width}px ${(layoutDims?.height || 0) * pixelArtConfig.pixelHeight / activeImageDims.height}px`,
-                      backgroundPosition: `${(layoutDims?.width || 0) * pixelArtConfig.offsetX / activeImageDims.width}px ${(layoutDims?.height || 0) * pixelArtConfig.offsetY / activeImageDims.height}px`
-                    }}
+                  <GridOverlay
+                    width={layoutDims.width}
+                    height={layoutDims.height}
+                    imageWidth={activeImageDims.width}
+                    imageHeight={activeImageDims.height}
+                    config={pixelArtConfig}
                   />
                 )}
 
@@ -694,5 +690,82 @@ const HighlightOverlay: React.FC<HighlightOverlayProps> = ({
         </div>
       )}
     </>
+  );
+};
+
+interface GridOverlayProps {
+  width: number;
+  height: number;
+  imageWidth: number;
+  imageHeight: number;
+  config: PixelArtConfig;
+}
+
+const GridOverlay: React.FC<GridOverlayProps> = ({ width, height, imageWidth, imageHeight, config }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // High DPI fix
+    const dpr = window.devicePixelRatio || 1;
+    // Align canvas size to physical pixels for sharpness
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+
+    // Reset transform for drawing
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    // Calculate grid cell size in screen pixels
+    const scaleX = width / imageWidth;
+    const scaleY = height / imageHeight;
+
+    const stepX = config.pixelWidth * scaleX;
+    const stepY = config.pixelHeight * scaleY;
+
+    // Minimum visual size threshold to prevent moire/mess
+    if (stepX < 4 || stepY < 4) return;
+
+    const startOffsetX = (config.offsetX * scaleX) % stepX;
+    const startOffsetY = (config.offsetY * scaleY) % stepY;
+
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)'; // Subtle dark lines
+    ctx.lineWidth = 1 / dpr; // True 1px line regardless of scale
+
+    // Draw verticals
+    for (let x = startOffsetX; x <= width; x += stepX) {
+      const xPos = Math.floor(x * dpr) / dpr + (0.5 / dpr);
+      if (xPos < width) {
+        ctx.moveTo(xPos, 0);
+        ctx.lineTo(xPos, height);
+      }
+    }
+
+    // Draw horizontals
+    for (let y = startOffsetY; y <= height; y += stepY) {
+      const yPos = Math.floor(y * dpr) / dpr + (0.5 / dpr);
+      if (yPos < height) {
+        ctx.moveTo(0, yPos);
+        ctx.lineTo(width, yPos);
+      }
+    }
+
+    ctx.stroke();
+
+  }, [width, height, imageWidth, imageHeight, config]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ width, height }}
+      className="absolute inset-0 pointer-events-none z-10"
+    />
   );
 };

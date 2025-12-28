@@ -1,4 +1,4 @@
-import { PaletteColor, ColorRGB, WorkerMessage } from './types';
+import { ColorRGB, WorkerMessage, TintSettings } from './types';
 import {
     rgbToHex,
     hexToRgb,
@@ -6,8 +6,57 @@ import {
     blendColors,
     sigmoidSnap,
     applyMedianFilter,
-    getColorDistance
+    getColorDistance,
+    rgbToHsl,
+    hslToRgb,
+    getHueDifference,
+    shiftHue,
+    calculateGroupBaseHue
 } from './utils/colorUtils';
+
+/**
+ * Apply tint to an RGB color with full HSL adjustments and individual force values.
+ * @param r - Red component (0-255)
+ * @param g - Green component (0-255)
+ * @param b - Blue component (0-255)
+ * @param baseHue - The reference hue of the color group (0-360)
+ * @param tint - The tint settings (hue, saturation shift, lightness shift, individual forces)
+ * @returns The tinted color as RGB
+ */
+function applyTintRGB(r: number, g: number, b: number, baseHue: number, tint: TintSettings): ColorRGB {
+    const hsl = rgbToHsl(r, g, b);
+
+    // For achromatic colors (very low saturation), only apply lightness adjustment
+    if (hsl.s < 5) {
+        const lForce = tint.lightnessForce / 100;
+        const adjustedL = Math.max(0, Math.min(100, hsl.l + tint.lightness * lForce));
+        return hslToRgb(hsl.h, hsl.s, adjustedL);
+    }
+
+    // Calculate the hue offset from the group's base hue
+    const hueOffset = getHueDifference(baseHue, hsl.h);
+
+    // Apply the same offset to the target hue
+    const targetHue = shiftHue(tint.hue, hueOffset);
+
+    // Apply individual force values for H, S, L
+    const hForce = tint.hueForce / 100;
+    const sForce = tint.saturationForce / 100;
+    const lForce = tint.lightnessForce / 100;
+
+    // Blend hue based on hueForce
+    const newHue = hForce < 1 ? hsl.h + (targetHue - hsl.h) * hForce : targetHue;
+
+    // Apply saturation shift with saturationForce
+    const saturationShift = tint.saturation * sForce;
+    const newS = Math.max(0, Math.min(100, hsl.s + saturationShift));
+
+    // Apply lightness shift with lightnessForce
+    const lightnessShift = tint.lightness * lForce;
+    const newL = Math.max(0, Math.min(100, hsl.l + lightnessShift));
+
+    return hslToRgb(newHue, newS, newL);
+}
 
 /**
  * Finds the optimal quality for a given format using binary search.
@@ -25,14 +74,14 @@ async function findOptimalQuality(
     let low = minQuality;
     let high = maxQuality;
     const tolerance = 0.01; // Higher precision for better quality
-    
+
     while (high - low > tolerance) {
         const mid = (low + high) / 2;
-        const testBlob = await canvas.convertToBlob({ 
-            type: format, 
-            quality: mid 
+        const testBlob = await canvas.convertToBlob({
+            type: format,
+            quality: mid
         });
-        
+
         if (testBlob.size <= targetSize) {
             // This quality works, try higher
             bestBlob = testBlob;
@@ -43,7 +92,7 @@ async function findOptimalQuality(
             high = mid;
         }
     }
-    
+
     return { blob: bestBlob, quality: bestQuality };
 }
 
@@ -57,23 +106,23 @@ async function intelligentCompress(
     isAutoMode: boolean
 ): Promise<Blob> {
     const TARGET_SIZE = 150 * 1024; // 150KB in bytes
-    
+
     if (!isAutoMode) {
         // For non-auto modes, use PNG without compression
         return await canvas.convertToBlob({ type: 'image/png' });
     }
-    
+
     // Try PNG first - it's lossless, so if it fits, it's the best choice for flags
     const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-    
+
     if (pngBlob.size <= TARGET_SIZE) {
         return pngBlob;
     }
-    
+
     // PNG is too large, try other formats
     let bestBlob: Blob = pngBlob;
     let bestFormat = 'png';
-    
+
     // Try GIF - good for flag-style images with limited colors, avoids JPEG artifacts
     try {
         const gifBlob = await canvas.convertToBlob({ type: 'image/gif' });
@@ -85,7 +134,7 @@ async function intelligentCompress(
     } catch (e) {
         // GIF encoding might not be supported in all environments
     }
-    
+
     // Only try JPEG as last resort - JPEG creates artifacts on flag-style images
     if (bestFormat === 'png') {
         const jpegResult = await findOptimalQuality(canvas, 'image/jpeg', TARGET_SIZE, 0.5, 1.0);
@@ -94,7 +143,7 @@ async function intelligentCompress(
             bestFormat = 'jpeg';
         }
     }
-    
+
     return bestBlob;
 }
 
@@ -114,7 +163,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         smoothingLevels,
         alphaSmoothness,
         preserveTransparency,
-        pixelArtConfig
+        pixelArtConfig,
+        recolorMode,
+        tintOverrides
     } = parameters;
 
     try {
@@ -124,11 +175,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // PIXEL ART MODE - Handle separately with different processing
         if (pixelArtConfig?.enabled) {
             const { pixelWidth, pixelHeight, offsetX, offsetY } = pixelArtConfig;
-            
+
             // Calculate pixelated dimensions
             const pixelCols = Math.ceil(nativeWidth / pixelWidth);
             const pixelRows = Math.ceil(nativeHeight / pixelHeight);
-            
+
             // Create canvas at native resolution for sampling
             const sourceCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
             const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
@@ -136,25 +187,25 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             sourceCtx.imageSmoothingEnabled = false; // Disable antialiasing
             sourceCtx.drawImage(imageBitmap, 0, 0);
             const sourceData = sourceCtx.getImageData(0, 0, nativeWidth, nativeHeight);
-            
+
             // Create pixelated canvas
             const pixelCanvas = new OffscreenCanvas(pixelCols, pixelRows);
             const pixelCtx = pixelCanvas.getContext('2d');
             if (!pixelCtx) throw new Error("Could not get pixel context");
             const pixelImageData = pixelCtx.createImageData(pixelCols, pixelRows);
-            
+
             // Sample majority color for each pixel block
             for (let py = 0; py < pixelRows; py++) {
                 for (let px = 0; px < pixelCols; px++) {
                     const colorCounts = new Map<string, { count: number; r: number; g: number; b: number; a: number }>();
-                    
+
                     // Sample all pixels in this block with offset
                     // Clamp coordinates to stay within image bounds to avoid sampling undefined pixels
                     const startX = Math.max(0, Math.min(px * pixelWidth + offsetX, nativeWidth - 1));
                     const startY = Math.max(0, Math.min(py * pixelHeight + offsetY, nativeHeight - 1));
                     const endX = Math.max(0, Math.min(startX + pixelWidth, nativeWidth));
                     const endY = Math.max(0, Math.min(startY + pixelHeight, nativeHeight));
-                    
+
                     for (let sy = startY; sy < endY; sy++) {
                         for (let sx = startX; sx < endX; sx++) {
                             const idx = (sy * nativeWidth + sx) * 4;
@@ -162,7 +213,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             const g = sourceData.data[idx + 1];
                             const b = sourceData.data[idx + 2];
                             const a = sourceData.data[idx + 3];
-                            
+
                             const key = `${r},${g},${b},${a}`;
                             const existing = colorCounts.get(key);
                             if (existing) {
@@ -172,7 +223,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             }
                         }
                     }
-                    
+
                     // Find majority color
                     let maxCount = 0;
                     let majorityColor = { r: 0, g: 0, b: 0, a: 255 };
@@ -182,21 +233,39 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             majorityColor = color;
                         }
                     }
-                    
+
                     // Apply recoloring if enabled
                     let finalColor = majorityColor;
                     if (!disableRecoloring && palette.length > 0) {
-                        // Find closest palette color
+                        // Find closest palette color to determine which group this pixel belongs to
                         const sourceRGB = { r: majorityColor.r, g: majorityColor.g, b: majorityColor.b };
                         const closest = findClosestColor(sourceRGB, palette);
-                        if (closest.targetHex) {
-                            const targetRGB = hexToRgb(closest.targetHex);
-                            if (targetRGB) {
-                                finalColor = { ...targetRGB, a: majorityColor.a }; // Preserve alpha
+
+                        if (recolorMode === 'tint' && tintOverrides) {
+                            // Tint mode: apply tint if set, otherwise keep original color
+                            const tint = tintOverrides[closest.id];
+                            if (tint !== undefined) {
+                                // Get base hue for the group
+                                const group = parameters.colorGroups?.find(g => g.id === closest.id);
+                                const baseHue = group?.baseHue ?? 0;
+                                const tinted = applyTintRGB(majorityColor.r, majorityColor.g, majorityColor.b, baseHue, tint);
+                                finalColor = { ...tinted, a: majorityColor.a };
+                            }
+                            // If no tint override, keep original color (finalColor = majorityColor)
+                        } else {
+                            // Palette mode: use target color if set, otherwise use the matched source color from palette
+                            if (closest.targetHex) {
+                                const targetRGB = hexToRgb(closest.targetHex);
+                                if (targetRGB) {
+                                    finalColor = { ...targetRGB, a: majorityColor.a }; // Recolor to target
+                                }
+                            } else {
+                                // Use the matched palette color (closest.r/g/b are the source color)
+                                finalColor = { r: closest.r, g: closest.g, b: closest.b, a: majorityColor.a };
                             }
                         }
                     }
-                    
+
                     // Set pixel color
                     const pixelIdx = (py * pixelCols + px) * 4;
                     pixelImageData.data[pixelIdx] = finalColor.r;
@@ -205,15 +274,15 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     pixelImageData.data[pixelIdx + 3] = preserveTransparency ? finalColor.a : 255;
                 }
             }
-            
+
             pixelCtx.putImageData(pixelImageData, 0, 0);
-            
+
             // Determine integer upscale factor - find largest integer that fits in target
             let finalScale = 1;
             if (!disableScaling) {
                 let targetWidth: number;
                 let targetHeight: number;
-                
+
                 if (upscaleFactor === 'NS') {
                     // Auto-scale to fit NationStates dimensions
                     const isLandscape = nativeWidth >= nativeHeight;
@@ -225,23 +294,23 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     targetWidth = nativeWidth * scale;
                     targetHeight = nativeHeight * scale;
                 }
-                
+
                 // Find largest integer scale that fits within target dimensions
                 const maxScaleX = Math.floor(targetWidth / pixelCols);
                 const maxScaleY = Math.floor(targetHeight / pixelRows);
                 finalScale = Math.max(1, Math.min(maxScaleX, maxScaleY));
             }
-            
+
             // Create final canvas with nearest-neighbor scaling (no smoothing)
             const finalWidth = pixelCols * finalScale;
             const finalHeight = pixelRows * finalScale;
             const finalCanvas = new OffscreenCanvas(finalWidth, finalHeight);
             const finalCtx = finalCanvas.getContext('2d');
             if (!finalCtx) throw new Error("Could not get final context");
-            
+
             finalCtx.imageSmoothingEnabled = false; // Critical for pixel art
             finalCtx.drawImage(pixelCanvas, 0, 0, finalWidth, finalHeight);
-            
+
             const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
             self.postMessage({ type: 'complete', result: blob });
             return;
@@ -250,21 +319,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // determine target scale
         let targetUpscale = 1;
         if (!disableScaling) {
-                    if (upscaleFactor === 'NS') {
-                        // Check if the image is Horizontal (Landscape) or Vertical (Portrait)
-                        const isLandscape = nativeWidth >= nativeHeight;
+            if (upscaleFactor === 'NS') {
+                // Check if the image is Horizontal (Landscape) or Vertical (Portrait)
+                const isLandscape = nativeWidth >= nativeHeight;
 
-                        if (isLandscape) {
-                            // Horizontal: Fit into 535x355
-                            targetUpscale = Math.min(535 / nativeWidth, 355 / nativeHeight);
-                        } else {
-                            // Vertical: Fit into 321x568
-                            targetUpscale = Math.min(321 / nativeWidth, 568 / nativeHeight);
-                        }
-                    } else {
-                        targetUpscale = upscaleFactor as number;
-                    }
+                if (isLandscape) {
+                    // Horizontal: Fit into 535x355
+                    targetUpscale = Math.min(535 / nativeWidth, 355 / nativeHeight);
+                } else {
+                    // Vertical: Fit into 321x568
+                    targetUpscale = Math.min(321 / nativeWidth, 568 / nativeHeight);
                 }
+            } else {
+                targetUpscale = upscaleFactor as number;
+            }
+        }
 
         const nativeCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
         const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
@@ -303,10 +372,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // --- PHASE 1: LOW-RES SOLVE (Original Resolution) ---
         const nativePixelData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight).data;
         let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
-        
+
         // Store original alpha channel at native resolution for nearest-neighbor lookup
         let nativeAlpha: Uint8ClampedArray | null = null;
-        if (hasTransparency) {
+        if (preserveTransparency) {
             nativeAlpha = new Uint8ClampedArray(nativeWidth * nativeHeight);
             for (let i = 0; i < nativePixelData.length; i += 4) {
                 nativeAlpha[i / 4] = nativePixelData[i + 3];
@@ -318,7 +387,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // This ensures the user's manual groupings override mathematical distance.
         const colorToGroupIdx = new Map<string, number>();
         const paletteIdMap = new Map<string, number>();
-        
+
         // Pre-cache palette colors in arrays for faster access
         const paletteSize = matchPalette.length;
         const paletteR = new Uint8Array(paletteSize);
@@ -374,14 +443,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             if (pIdx === undefined) {
                 let minDistSq = Infinity;
                 let closestIdx = 0;
-                
+
                 // Inline distance calculation using cached arrays
                 for (let j = 0; j < paletteSize; j++) {
                     const dr = r - paletteR[j];
                     const dg = g - paletteG[j];
                     const db = b - paletteB[j];
                     const distSq = dr * dr + dg * dg + db * db;
-                    
+
                     if (distSq < minDistSq) {
                         minDistSq = distSq;
                         closestIdx = j;
@@ -440,7 +509,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         let major1Idx = 0, major1Count = 0;
                         let major2Idx = 0, major2Count = 0;
                         let m3 = 0, m3Count = 0;
-                        
+
                         for (let i = 0; i < paletteSize; i++) {
                             const count = localCounts[i];
                             if (count > major1Count) {
@@ -460,7 +529,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             const p1r = paletteR[major1Idx], p1g = paletteG[major1Idx], p1b = paletteB[major1Idx];
                             const p2r = paletteR[major2Idx], p2g = paletteG[major2Idx], p2b = paletteB[major2Idx];
                             const p3r = paletteR[m3], p3g = paletteG[m3], p3b = paletteB[m3];
-                            
+
                             const d13 = Math.sqrt((p1r - p3r) ** 2 + (p1g - p3g) ** 2 + (p1b - p3b) ** 2);
                             const d12 = Math.sqrt((p1r - p2r) ** 2 + (p1g - p2g) ** 2 + (p1b - p2b) ** 2);
                             const d23 = Math.sqrt((p3r - p2r) ** 2 + (p3g - p2g) ** 2 + (p3b - p2b) ** 2);
@@ -525,31 +594,59 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         const scaleX = finalWorkspaceWidth / nativeWidth;
         const scaleY = finalWorkspaceHeight / nativeHeight;
-        
-        // Pre-cache targetHex conversions for all palette colors
+
+        // Pre-cache targetHex conversions for all palette colors (palette mode)
         const paletteTargetR = new Uint8Array(paletteSize);
         const paletteTargetG = new Uint8Array(paletteSize);
         const paletteTargetB = new Uint8Array(paletteSize);
+
+        // Pre-cache base hues and tint settings for tint mode
+        const paletteBaseHue = new Float32Array(paletteSize);
+        const paletteTintSettings: (TintSettings | null)[] = new Array(paletteSize).fill(null);
+        const paletteHasTint = new Uint8Array(paletteSize); // 1 if this palette entry has a tint override
+
+        const isTintMode = recolorMode === 'tint' && tintOverrides;
+
         for (let i = 0; i < paletteSize; i++) {
             const p = matchPalette[i];
-            if (p.targetHex) {
-                const rgb = hexToRgb(p.targetHex);
-                if (rgb) {
-                    paletteTargetR[i] = rgb.r;
-                    paletteTargetG[i] = rgb.g;
-                    paletteTargetB[i] = rgb.b;
+
+            if (isTintMode) {
+                // Tint mode: cache base hue and tint settings
+                const tint = tintOverrides![p.id];
+                if (tint !== undefined) {
+                    const group = parameters.colorGroups?.find(g => g.id === p.id);
+                    paletteBaseHue[i] = group?.baseHue ?? 0;
+                    paletteTintSettings[i] = tint;
+                    paletteHasTint[i] = 1;
                 } else {
+                    paletteHasTint[i] = 0;
+                }
+                // Still cache palette colors for non-tinted groups
+                paletteTargetR[i] = paletteR[i];
+                paletteTargetG[i] = paletteG[i];
+                paletteTargetB[i] = paletteB[i];
+            } else {
+                // Palette mode: direct color replacement
+                if (p.targetHex) {
+                    const rgb = hexToRgb(p.targetHex);
+                    if (rgb) {
+                        paletteTargetR[i] = rgb.r;
+                        paletteTargetG[i] = rgb.g;
+                        paletteTargetB[i] = rgb.b;
+                    } else {
+                        paletteTargetR[i] = paletteR[i];
+                        paletteTargetG[i] = paletteG[i];
+                        paletteTargetB[i] = paletteB[i];
+                    }
+                } else {
+                    // If no targetHex, use the source color (paletteR/G/B)
                     paletteTargetR[i] = paletteR[i];
                     paletteTargetG[i] = paletteG[i];
                     paletteTargetB[i] = paletteB[i];
                 }
-            } else {
-                paletteTargetR[i] = paletteR[i];
-                paletteTargetG[i] = paletteG[i];
-                paletteTargetB[i] = paletteB[i];
             }
         }
-        
+
         // Pre-allocate reusable arrays for pixel loop to reduce allocations
         const reuseLocalWeights = new Float32Array(paletteSize);
         const reuseAdjWhitelist = new Uint8Array(paletteSize);
@@ -593,7 +690,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         reuseLocalWeights[nIdx] += weight;
                     }
                 }
-                
+
                 // 1. Identify all unique candidates in the neighborhood
                 const uniqueCandidates: number[] = [];
                 for (let i = 0; i < paletteSize; i++) {
@@ -606,7 +703,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 // We reject it from being a blend partner.
                 const structuralCandidates: number[] = [];
                 const ucLen = uniqueCandidates.length;
-                
+
                 candidateLoop: for (let ci = 0; ci < ucLen; ci++) {
                     const cIdx = uniqueCandidates[ci];
                     const pCr = paletteR[cIdx];
@@ -617,7 +714,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     for (let ai = 0; ai < ucLen; ai++) {
                         const aIdx = uniqueCandidates[ai];
                         if (aIdx === cIdx) continue;
-                        
+
                         for (let bi = 0; bi < ucLen; bi++) {
                             const bIdx = uniqueCandidates[bi];
                             if (bIdx === cIdx || aIdx === bIdx) continue;
@@ -664,7 +761,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const scLen = structuralCandidates.length;
                 let maxScore = -Infinity;
                 let maxIdx = 0;
-                
+
                 for (let i = 0; i < scLen; i++) {
                     const cIdx = structuralCandidates[i];
                     const pR = paletteR[cIdx];
@@ -692,18 +789,18 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 let major1Idx = scLen > 0 ? structuralCandidates[maxIdx] : uniqueCandidates[0];
                 let major2Idx = major1Idx;
                 let secondMaxScore = -Infinity;
-                
+
                 for (let i = 0; i < scLen; i++) {
                     if (i !== maxIdx && reuseScores[i] > secondMaxScore) {
                         secondMaxScore = reuseScores[i];
                         major2Idx = structuralCandidates[i];
                     }
                 }
-                
+
                 if (secondMaxScore <= -500) {
                     major2Idx = major1Idx;
                 }
-                
+
                 // 4. Determine Resolve Pair
                 const coreIdx = lowResIdxMap[lyOffset + lx];
                 let blendA = coreIdx;
@@ -737,9 +834,18 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 let finalR: number, finalG: number, finalB: number;
 
                 if (blendA === blendB) {
-                    finalR = paletteTargetR[blendA];
-                    finalG = paletteTargetG[blendA];
-                    finalB = paletteTargetB[blendA];
+                    if (isTintMode) {
+                        if (paletteHasTint[blendA] && paletteTintSettings[blendA]) {
+                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[blendA], paletteTintSettings[blendA]!);
+                            finalR = tinted.r; finalG = tinted.g; finalB = tinted.b;
+                        } else {
+                            finalR = refR; finalG = refG; finalB = refB;
+                        }
+                    } else {
+                        finalR = paletteTargetR[blendA];
+                        finalG = paletteTargetG[blendA];
+                        finalB = paletteTargetB[blendA];
+                    }
                 } else if (effectiveSmoothingLevels === 0) {
                     const p1R = paletteR[blendA], p1G = paletteG[blendA], p1B = paletteB[blendA];
                     const p2R = paletteR[blendB], p2G = paletteG[blendB], p2B = paletteB[blendB];
@@ -748,9 +854,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const dist1 = dr1 * dr1 + dg1 * dg1 + db1 * db1;
                     const dist2 = dr2 * dr2 + dg2 * dg2 + db2 * db2;
                     const winnerIdx = dist1 < dist2 ? blendA : blendB;
-                    finalR = paletteTargetR[winnerIdx];
-                    finalG = paletteTargetG[winnerIdx];
-                    finalB = paletteTargetB[winnerIdx];
+
+                    if (isTintMode) {
+                        if (paletteHasTint[winnerIdx] && paletteTintSettings[winnerIdx]) {
+                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[winnerIdx], paletteTintSettings[winnerIdx]!);
+                            finalR = tinted.r; finalG = tinted.g; finalB = tinted.b;
+                        } else {
+                            finalR = refR; finalG = refG; finalB = refB;
+                        }
+                    } else {
+                        finalR = paletteTargetR[winnerIdx];
+                        finalG = paletteTargetG[winnerIdx];
+                        finalB = paletteTargetB[winnerIdx];
+                    }
                 } else {
                     const c1R = paletteR[blendA], c1G = paletteG[blendA], c1B = paletteB[blendA];
                     const c2R = paletteR[blendB], c2G = paletteG[blendB], c2B = paletteB[blendB];
@@ -830,12 +946,39 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const rawS = 1 / (1 + Math.exp(-k * (bestT - 0.5)));
                     const finalT = (rawS - s0) / (s1 - s0);
 
-                    const t1R = paletteTargetR[blendA], t1G = paletteTargetG[blendA], t1B = paletteTargetB[blendA];
-                    const t2R = paletteTargetR[blendB], t2G = paletteTargetG[blendB], t2B = paletteTargetB[blendB];
+                    // For tint mode, apply tint to ORIGINAL source pixel, then blend
+                    if (isTintMode) {
+                        // Tint the source pixel based on each group's tint settings, then blend
+                        let t1R: number, t1G: number, t1B: number;
+                        let t2R: number, t2G: number, t2B: number;
 
-                    finalR = Math.round(t1R + finalT * (t2R - t1R));
-                    finalG = Math.round(t1G + finalT * (t2G - t1G));
-                    finalB = Math.round(t1B + finalT * (t2B - t1B));
+                        if (paletteHasTint[blendA] && paletteTintSettings[blendA]) {
+                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[blendA], paletteTintSettings[blendA]!);
+                            t1R = tinted.r; t1G = tinted.g; t1B = tinted.b;
+                        } else {
+                            // No tint: use original source pixel color
+                            t1R = refR; t1G = refG; t1B = refB;
+                        }
+
+                        if (paletteHasTint[blendB] && paletteTintSettings[blendB]) {
+                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[blendB], paletteTintSettings[blendB]!);
+                            t2R = tinted.r; t2G = tinted.g; t2B = tinted.b;
+                        } else {
+                            // No tint: use original source pixel color
+                            t2R = refR; t2G = refG; t2B = refB;
+                        }
+
+                        finalR = Math.round(t1R + finalT * (t2R - t1R));
+                        finalG = Math.round(t1G + finalT * (t2G - t1G));
+                        finalB = Math.round(t1B + finalT * (t2B - t1B));
+                    } else {
+                        // Palette mode: blend target colors
+                        const t1R = paletteTargetR[blendA], t1G = paletteTargetG[blendA], t1B = paletteTargetB[blendA];
+                        const t2R = paletteTargetR[blendB], t2G = paletteTargetG[blendB], t2B = paletteTargetB[blendB];
+                        finalR = Math.round(t1R + finalT * (t2R - t1R));
+                        finalG = Math.round(t1G + finalT * (t2G - t1G));
+                        finalB = Math.round(t1B + finalT * (t2B - t1B));
+                    }
                 }
 
 
@@ -844,10 +987,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const nativeAlphaIdx = ly * nativeWidth + lx;
                 const sharpAlpha = nativeAlpha[nativeAlphaIdx];
                 const smoothAlpha = highResPixelData[outIdx + 3];
-                
+
                 let finalAlpha: number;
                 const alphaIntensity = (alphaSmoothness || 0) / 100;
-                
+
                 if (alphaIntensity === 0) {
                     // Binary snap: pure nearest-neighbor
                     finalAlpha = sharpAlpha;
@@ -855,22 +998,22 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     // Apply sigmoid to interpolated alpha value
                     // Normalize to 0-1 range
                     const alphaNorm = smoothAlpha / 255;
-                    
+
                     // Sigmoid sharpness: k increases with lower alphaSmoothness
                     // At 10%: k=20 (very sharp, nearly binary)
                     // At 50%: k=8 (moderate smoothing)
                     // At 100%: k=2 (gentle smoothing)
                     const k = 20 * (1 - alphaIntensity) + 2 * alphaIntensity;
-                    
+
                     // Apply sigmoid centered at 0.5
                     const s0 = 1 / (1 + Math.exp(-k * (-0.5)));
                     const s1 = 1 / (1 + Math.exp(-k * (0.5)));
                     const rawS = 1 / (1 + Math.exp(-k * (alphaNorm - 0.5)));
                     const sigmoidAlpha = (rawS - s0) / (s1 - s0);
-                    
+
                     finalAlpha = Math.round(sigmoidAlpha * 255);
                 }
-                
+
                 outputData[outIdx] = finalR;
                 outputData[outIdx + 1] = finalG;
                 outputData[outIdx + 2] = finalB;

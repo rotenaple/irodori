@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig } from './types';
+import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig, RecolorMode, TintSettings } from './types';
 import {
   rgbToHex,
   hexToRgb,
@@ -10,12 +10,14 @@ import {
   blendColors,
   sigmoidSnap,
   applyMedianFilter,
-  getColorDistance
+  getColorDistance,
+  calculateGroupBaseHue
 } from './utils/colorUtils';
 import { Header } from './components/Header';
 import { ControlPanel } from './components/ControlPanel';
 import { ImageWorkspace } from './components/ImageWorkspace';
 import { ColorPickerModal } from './components/ColorPickerModal';
+import { TintModal } from './components/TintModal';
 
 const App: React.FC = () => {
   const [image, setImage] = useState<string | null>(null);
@@ -40,7 +42,7 @@ const App: React.FC = () => {
   const [alphaSmoothness, setAlphaSmoothness] = useState<number>(0);
   const [hasTransparency, setHasTransparency] = useState<boolean>(false);
   const [preserveTransparency, setPreserveTransparency] = useState<boolean>(true);
-  
+
   // Pixel Art Mode State
   const [pixelArtConfig, setPixelArtConfig] = useState<PixelArtConfig>({
     enabled: false,
@@ -53,6 +55,10 @@ const App: React.FC = () => {
     lockOffset: false
   });
 
+  // Recolor Mode State
+  const [recolorMode, setRecolorMode] = useState<RecolorMode>('palette');
+  const [tintOverrides, setTintOverrides] = useState<Record<string, TintSettings>>({});
+
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
@@ -61,6 +67,7 @@ const App: React.FC = () => {
   const [processedSize, setProcessedSize] = useState<number>(0);
 
   const [editTarget, setEditTarget] = useState<{ id: string, type: 'original' | 'recolor' } | null>(null);
+  const [tintModalGroupId, setTintModalGroupId] = useState<string | null>(null);
   const [hoveredColor, setHoveredColor] = useState<string | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
 
@@ -119,6 +126,7 @@ const App: React.FC = () => {
         setColorOverrides({});
         setActiveTab('original');
         setMobileViewTarget(null);
+        setTintOverrides({});
       };
       reader.readAsDataURL(file);
     }
@@ -145,7 +153,7 @@ const App: React.FC = () => {
         if (ctx) {
           ctx.drawImage(img, 0, 0, drawWidth, drawHeight);
           const imageData = ctx.getImageData(0, 0, drawWidth, drawHeight);
-          
+
           // Check for transparency
           let foundTransparency = false;
           for (let i = 3; i < imageData.data.length; i += 4) {
@@ -177,7 +185,8 @@ const App: React.FC = () => {
             .slice(0, 10)
             .map((g: ColorGroup) => ({
               ...g,
-              representativeHex: g.members[0].hex
+              representativeHex: g.members[0].hex,
+              baseHue: calculateGroupBaseHue(g.members)  // Calculate base hue for tint mode
             }));
 
           setColorGroups(significantGroups);
@@ -190,7 +199,7 @@ const App: React.FC = () => {
           });
           setSelectedInGroup(initialSelections);
           setEnabledGroups(initialEnabled);
-          
+
           // Calculate default pixel size for pixel art mode
           // Good heuristic: aim for 40-80 pixels on the shorter dimension
           const shorterDim = Math.min(drawWidth, drawHeight);
@@ -232,37 +241,210 @@ const App: React.FC = () => {
           id: `group-${Math.random().toString(36).substr(2, 5)}`,
           members: [colorToMove],
           totalCount: colorToMove.count,
-          representativeHex: colorToMove.hex
+          representativeHex: colorToMove.hex,
+          baseHue: calculateGroupBaseHue([colorToMove])  // Calculate base hue
         };
         setEnabledGroups(prevEnabled => new Set(prevEnabled).add(newGroup.id));
         setSelectedInGroup(prevSelected => ({ ...prevSelected, [newGroup.id]: colorToMove!.hex }));
         return [...nextGroups, newGroup];
       } else {
-        return nextGroups.map(g => {
-          if (g.id === targetGroupId) {
-            const members = [...g.members, colorToMove!];
-            return { ...g, members, totalCount: members.reduce((sum, m) => sum + m.count, 0) };
-          }
-          return g;
-        });
+        // Check if target is a manual layer (not in colorGroups)
+        const isTargetManual = manualLayerIds.includes(targetGroupId);
+        if (isTargetManual) {
+          // Convert manual layer to regular group by adding this color AND the manual color as a member
+          const targetHex = selectedInGroup[targetGroupId] || '#ffffff';
+          const manualRgb = hexToRgb(targetHex) ?? { r: 255, g: 255, b: 255 };
+          const manualMember: ColorInstance = { hex: targetHex, count: 0, rgb: manualRgb }; // Synthetic member for manual layer
+
+          const newGroup: ColorGroup = {
+            id: targetGroupId,
+            members: [manualMember, colorToMove],
+            totalCount: colorToMove.count,
+            representativeHex: targetHex,
+            baseHue: calculateGroupBaseHue([manualMember, colorToMove])
+          };
+          // Remove from manual layers
+          setManualLayerIds(prevManual => prevManual.filter(mid => mid !== targetGroupId));
+          return [...nextGroups, newGroup];
+        } else {
+          // Target is a regular group
+          return nextGroups.map(g => {
+            if (g.id === targetGroupId) {
+              const members = [...g.members, colorToMove!];
+              return {
+                ...g,
+                members,
+                totalCount: members.reduce((sum, m) => sum + m.count, 0),
+                baseHue: calculateGroupBaseHue(members)  // Recalculate base hue
+              };
+            }
+            return g;
+          });
+        }
       }
     });
   };
 
   const mergeGroups = (sourceGroupId: string, targetGroupId: string) => {
     if (sourceGroupId === targetGroupId) return;
+
+    const isSourceManual = manualLayerIds.includes(sourceGroupId);
+    const isTargetManual = manualLayerIds.includes(targetGroupId);
+
+    // If both are manual, isTargetManual block below will handle it (sourceGroup will be undefined)
+
+
+    // If target is manual, convert it to a regular group first by adding the source's members
+    if (isTargetManual) {
+      const sourceGroup = colorGroups.find(g => g.id === sourceGroupId);
+      if (!sourceGroup) {
+        // Special case: Merging Manual (source) into Manual (target) where source wasn't found as a group
+        // This typically happens if source is also purely manual (no members).
+        // Create members for BOTH manual layers.
+        const targetHex = selectedInGroup[targetGroupId] || '#ffffff';
+        const sourceHex = selectedInGroup[sourceGroupId] || '#ffffff';
+
+        const targetRgb = hexToRgb(targetHex);
+        const sourceRgb = hexToRgb(sourceHex);
+        if (!targetRgb || !sourceRgb) {
+          // If either hex value is invalid, abort this merge to avoid runtime errors.
+          console.error('Invalid hex color when merging manual groups', { targetHex, sourceHex });
+          return;
+        }
+
+        const manualMemberTarget: ColorInstance = { hex: targetHex, count: 0, rgb: targetRgb };
+        const manualMemberSource: ColorInstance = { hex: sourceHex, count: 0, rgb: sourceRgb };
+
+        const newGroup: ColorGroup = {
+          id: targetGroupId,
+          members: [manualMemberTarget, manualMemberSource],
+          totalCount: 0,
+          representativeHex: targetHex,
+          baseHue: calculateGroupBaseHue([manualMemberTarget, manualMemberSource])
+        };
+
+        setColorGroups(prev => [...prev, newGroup]);
+        setManualLayerIds(prev => prev.filter(mid => mid !== targetGroupId && mid !== sourceGroupId));
+
+        // Setup source state cleanups
+        setSelectedInGroup(prev => {
+          const next = { ...prev, [targetGroupId]: targetHex };
+          delete next[sourceGroupId];
+          return next;
+        });
+
+        setEnabledGroups(prev => {
+          const next = new Set(prev);
+          next.delete(sourceGroupId);
+          next.add(targetGroupId);
+          return next;
+        });
+
+        setColorOverrides(prev => {
+          const next = { ...prev };
+          delete next[sourceGroupId];
+          return next;
+        });
+
+        setTintOverrides(prev => {
+          const next = { ...prev };
+          delete next[sourceGroupId];
+          return next;
+        });
+        return;
+      }
+
+      const targetHex = selectedInGroup[targetGroupId] || '#ffffff';
+      const sourceTargetOverride = colorOverrides[sourceGroupId];
+      const sourceTintOverride = tintOverrides[sourceGroupId];
+
+      // Add synthetic member for the target manual layer
+      const targetRgb = hexToRgb(targetHex);
+      if (!targetRgb) {
+        // If the hex color is invalid, leave color groups unchanged
+        return prev;
+      }
+      const manualMemberTarget: ColorInstance = { hex: targetHex, count: 0, rgb: targetRgb };
+
+      const newMembers = [manualMemberTarget, ...sourceGroup.members];
+      const newGroup: ColorGroup = {
+        id: targetGroupId,
+        members: newMembers,
+        totalCount: sourceGroup.totalCount,
+        representativeHex: targetHex,
+        baseHue: calculateGroupBaseHue(newMembers)
+      };
+
+      setColorGroups(prev => [...prev.filter(g => g.id !== sourceGroupId), newGroup]);
+      setManualLayerIds(prev => prev.filter(mid => mid !== targetGroupId));
+      setSelectedInGroup(prev => {
+        const next = { ...prev, [targetGroupId]: targetHex };
+        delete next[sourceGroupId];
+        return next;
+      });
+
+      // Transfer overrides if they existed on source but not on target
+      if (sourceTargetOverride && !colorOverrides[targetGroupId]) {
+        setColorOverrides(prev => ({ ...prev, [targetGroupId]: sourceTargetOverride }));
+      }
+      if (sourceTintOverride && !tintOverrides[targetGroupId]) {
+        setTintOverrides(prev => ({ ...prev, [targetGroupId]: sourceTintOverride }));
+      }
+
+      setEnabledGroups(prev => {
+        const next = new Set(prev);
+        next.delete(sourceGroupId);
+        return next;
+      });
+      return;
+    }
+
+    // Target is Regular Group. Source could be Manual or Regular.
     let newRepresentative: string | undefined;
 
     setColorGroups(prev => {
       const sourceGroup = prev.find(g => g.id === sourceGroupId);
-      if (!sourceGroup) return prev;
 
+      // If source is Manual (and sourceGroup undefined), we need to add it as a new member
+      if (!sourceGroup) {
+        if (!isSourceManual) return prev; // Should be impossible if logic holds
+
+        const sourceHex = selectedInGroup[sourceGroupId] || '#ffffff';
+        const rgb = hexToRgb(sourceHex);
+        if (!rgb) {
+          // If the hex color is invalid, leave color groups unchanged
+          return prev;
+        }
+        const manualMemberSource: ColorInstance = { hex: sourceHex, count: 0, rgb };
+
+        return prev.map(g => {
+          if (g.id === targetGroupId) {
+            const members = [...g.members, manualMemberSource];
+            return {
+              ...g,
+              members,
+              // Don't change totalCount significantly for manual additions
+              baseHue: calculateGroupBaseHue(members)
+            };
+          }
+          return g;
+        });
+      }
+
+      // Regular -> Regular
       const updated = prev.map(g => {
         if (g.id === targetGroupId) {
           const members = [...g.members, ...sourceGroup.members];
           const sortedMembers = [...members].sort((a, b) => b.count - a.count);
-          newRepresentative = sortedMembers[0].hex;
-          return { ...g, members, totalCount: members.reduce((sum, m) => sum + m.count, 0), representativeHex: newRepresentative };
+          // Only use new representative if target doesn't have a manual one
+          newRepresentative = selectedInGroup[targetGroupId] || sortedMembers[0].hex;
+          return {
+            ...g,
+            members,
+            totalCount: members.reduce((sum, m) => sum + m.count, 0),
+            representativeHex: newRepresentative,
+            baseHue: calculateGroupBaseHue(members)
+          };
         }
         return g;
       }).filter(g => g.id !== sourceGroupId);
@@ -270,14 +452,46 @@ const App: React.FC = () => {
     });
 
     if (newRepresentative) {
-      setSelectedInGroup(prev => ({ ...prev, [targetGroupId]: newRepresentative! }));
+      setSelectedInGroup(prev => {
+        const next = { ...prev, [targetGroupId]: newRepresentative! };
+        delete next[sourceGroupId];
+        return next;
+      });
+    } else {
+      // Just delete source
+      setSelectedInGroup(prev => {
+        const next = { ...prev };
+        delete next[sourceGroupId];
+        return next;
+      });
     }
+
+    // Preserve target overrides, transfer source overrides only if target has none
+    setColorOverrides(prev => {
+      const next = { ...prev };
+      if (!next[targetGroupId] && next[sourceGroupId]) {
+        next[targetGroupId] = next[sourceGroupId];
+      }
+      delete next[sourceGroupId];
+      return next;
+    });
+
+    setTintOverrides(prev => {
+      const next = { ...prev };
+      if (!next[targetGroupId] && next[sourceGroupId]) {
+        next[targetGroupId] = next[sourceGroupId];
+      }
+      delete next[sourceGroupId];
+      return next;
+    });
+
     setEnabledGroups(prev => {
       const next = new Set(prev);
       next.delete(sourceGroupId);
       return next;
     });
   };
+
 
   const recomputeGroups = () => {
     if (fullColorList.length === 0 || colorGroups.length === 0) return;
@@ -303,7 +517,13 @@ const App: React.FC = () => {
           targetGroup.totalCount += color.count;
         }
       });
-      return newGroups.filter(g => g.members.length > 0 || manualLayerIds.includes(g.id));
+      // Recalculate baseHue for each group after regrouping
+      return newGroups
+        .map(g => ({
+          ...g,
+          baseHue: g.members.length > 0 ? calculateGroupBaseHue(g.members) : g.baseHue
+        }))
+        .filter(g => g.members.length > 0 || manualLayerIds.includes(g.id));
     });
   };
 
@@ -311,12 +531,39 @@ const App: React.FC = () => {
     const p: PaletteColor[] = [];
     enabledGroups.forEach(id => {
       const baseHex = selectedInGroup[id];
-      const targetHex = colorOverrides[id];
-      const rgb = hexToRgb(baseHex);
-      if (rgb) p.push({ ...rgb, hex: baseHex, id, targetHex });
+      // Logic Fix 1 & 2: Palette Mode Defaults & Tint Mode Isolation
+      // In Tint Mode, force targetHex to undefined to prevent overrides leakage.
+      // In Palette Mode, if no override, default to Representative Color (baseHex) to enforce consolidation.
+      let targetHex: string | undefined;
+
+      if (recolorMode === 'tint') {
+        targetHex = undefined;
+      } else {
+        targetHex = colorOverrides[id] || baseHex;
+      }
+
+      // Always add the base color if it exists
+      if (baseHex) {
+        const rgb = hexToRgb(baseHex);
+        if (rgb) p.push({ ...rgb, hex: baseHex, id, targetHex });
+      }
+
+      // Add ALL member colors so they match to their correct group (both palette and tint modes)
+      const group = colorGroups.find(g => g.id === id);
+      if (group && group.members) {
+        for (const member of group.members) {
+          // Skip if it's the same as the representative
+          if (baseHex && member.hex.toLowerCase() === baseHex.toLowerCase()) continue;
+          const memberRgb = hexToRgb(member.hex);
+          if (memberRgb) {
+            p.push({ ...memberRgb, hex: member.hex, id, targetHex });
+          }
+        }
+      }
+      // If this is a manual layer (no group with members), the baseHex is already added above
     });
     return p;
-  }, [selectedInGroup, enabledGroups, colorOverrides]);
+  }, [selectedInGroup, enabledGroups, colorOverrides, recolorMode, colorGroups]);
 
   const workerRef = useRef<Worker | null>(null);
 
@@ -347,7 +594,7 @@ const App: React.FC = () => {
 
     if (isSvg && svgContent) {
       try {
-        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides);
+        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides, recolorMode, tintOverrides);
         const blob = new Blob([recoloredSvgContent], { type: 'image/svg+xml' });
         setProcessedSize(blob.size);
         setProcessedBlob(blob);
@@ -381,7 +628,9 @@ const App: React.FC = () => {
           vertexInertia,
           alphaSmoothness,
           preserveTransparency,
-          pixelArtConfig
+          pixelArtConfig,
+          recolorMode,
+          tintOverrides
         }
       }, [imageBitmap]);
     } catch (err) {
@@ -411,7 +660,7 @@ const App: React.FC = () => {
       link.href = processedImage!;
       const dotIndex = originalFileName.lastIndexOf('.');
       const baseName = dotIndex !== -1 ? originalFileName.substring(0, dotIndex) : originalFileName;
-      
+
       // Determine file extension based on blob type
       if (processedBlob.type === 'image/svg+xml') {
         link.download = `${baseName}-irodori.svg`;
@@ -422,7 +671,7 @@ const App: React.FC = () => {
       } else {
         link.download = `${baseName}-irodori.png`;
       }
-      
+
       link.click();
     }
   };
@@ -476,6 +725,11 @@ const App: React.FC = () => {
               onMobileViewToggle={handleMobileView}
               pixelArtConfig={pixelArtConfig}
               setPixelArtConfig={setPixelArtConfig}
+              recolorMode={recolorMode}
+              setRecolorMode={setRecolorMode}
+              tintOverrides={tintOverrides}
+              setTintOverrides={setTintOverrides}
+              setTintModalGroupId={setTintModalGroupId}
             />
           </div>
           <div className="px-4 md:px-6 py-4 z-20">
@@ -524,7 +778,7 @@ const App: React.FC = () => {
                 ? (selectedInGroup[editTarget.id] || '#ffffff')
                 : (colorOverrides[editTarget.id] || selectedInGroup[editTarget.id] || '#ffffff')
             }
-            suggestions={editTarget.type === 'original' ? colorGroups.find(g => g.id === editTarget.id)?.members : []}
+            suggestions={colorGroups.find(g => g.id === editTarget.id)?.members || []}
             showNoneOption={editTarget.type === 'recolor'}
             onChange={(hex) => {
               if (editTarget.type === 'original') setSelectedInGroup(prev => ({ ...prev, [editTarget.id]: hex }));
@@ -534,6 +788,28 @@ const App: React.FC = () => {
               }
             }}
             onClose={() => setEditTarget(null)}
+          />
+        </div>
+      )}
+      {tintModalGroupId && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm" onClick={() => setTintModalGroupId(null)}>
+          <TintModal
+            groupId={tintModalGroupId}
+            baseHue={colorGroups.find(g => g.id === tintModalGroupId)?.baseHue ?? 0}
+            currentSettings={tintOverrides[tintModalGroupId]}
+            colorMembers={colorGroups.find(g => g.id === tintModalGroupId)?.members ?? []}
+            onChange={(settings) => {
+              if (settings) {
+                setTintOverrides(prev => ({ ...prev, [tintModalGroupId]: settings }));
+              } else {
+                setTintOverrides(prev => {
+                  const next = { ...prev };
+                  delete next[tintModalGroupId];
+                  return next;
+                });
+              }
+            }}
+            onClose={() => setTintModalGroupId(null)}
           />
         </div>
       )}
