@@ -11,6 +11,8 @@ export interface ColorHSL {
   l: number;
 }
 
+export type RecolorMode = 'palette' | 'tint';
+
 export interface PaletteColor extends ColorRGB {
   hex: string;
   id: string;
@@ -30,6 +32,8 @@ export interface ColorGroup {
   members: ColorInstance[];
   totalCount: number;
   representativeHex?: string; // Cache the chosen representative or override
+  baseHue?: number;           // For tint mode: the average/representative hue of the group (0-360)
+  targetHue?: number;         // For tint mode: the target hue to shift to (0-360)
 }
 
 export interface PixelArtConfig {
@@ -44,6 +48,15 @@ export interface PixelArtConfig {
 }
 
 export type ProcessingState = 'idle' | 'processing' | 'completed';
+
+export interface TintSettings {
+  hue: number;           // Target hue (0-360)
+  saturation: number;    // Saturation adjustment (-100 to 100, 0 = no change)
+  lightness: number;     // Lightness adjustment (-100 to 100, 0 = no change)
+  hueForce: number;      // How strongly to apply hue shift (0-100, 100 = full)
+  saturationForce: number; // How strongly to apply saturation shift (0-100, 100 = full)
+  lightnessForce: number;  // How strongly to apply lightness shift (0-100, 100 = full)
+}
 
 export type WorkerMessage = {
   type: 'process';
@@ -64,6 +77,8 @@ export type WorkerMessage = {
     alphaSmoothness: number;
     preserveTransparency: boolean;
     pixelArtConfig?: PixelArtConfig;
+    recolorMode?: RecolorMode;        // 'palette' (default) or 'tint'
+    tintOverrides?: Record<string, TintSettings>;  // For tint mode: group ID -> tint settings
   };
   svgContent?: string;
 };
