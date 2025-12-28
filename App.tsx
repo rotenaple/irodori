@@ -37,6 +37,8 @@ const App: React.FC = () => {
   const [disableRecoloring, setDisableRecoloring] = useState<boolean>(false);
   const [disablePostProcessing, setDisablePostProcessing] = useState<boolean>(false);
   const [disableScaling, setDisableScaling] = useState<boolean>(false);
+  const [alphaSmoothness, setAlphaSmoothness] = useState<number>(0);
+  const [hasTransparency, setHasTransparency] = useState<boolean>(false);
 
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
@@ -130,6 +132,16 @@ const App: React.FC = () => {
         if (ctx) {
           ctx.drawImage(img, 0, 0, drawWidth, drawHeight);
           const imageData = ctx.getImageData(0, 0, drawWidth, drawHeight);
+          
+          // Check for transparency
+          let foundTransparency = false;
+          for (let i = 3; i < imageData.data.length; i += 4) {
+            if (imageData.data[i] < 255) {
+              foundTransparency = true;
+              break;
+            }
+          }
+          setHasTransparency(foundTransparency);
 
           let extractionResult;
           if (isSvg && svgContent) {
@@ -343,7 +355,8 @@ const App: React.FC = () => {
           enabledGroups: Array.from(enabledGroups),
           selectedInGroup,
           smoothingLevels,
-          vertexInertia
+          vertexInertia,
+          alphaSmoothness
         }
       }, [imageBitmap]);
     } catch (err) {
@@ -406,6 +419,8 @@ const App: React.FC = () => {
               edgeProtection={edgeProtection} setEdgeProtection={setEdgeProtection}
               vertexInertia={vertexInertia} setVertexInertia={setVertexInertia}
               colorGroupingDistance={colorGroupingDistance} setColorGroupingDistance={setColorGroupingDistance}
+              alphaSmoothness={alphaSmoothness} setAlphaSmoothness={setAlphaSmoothness}
+              hasTransparency={hasTransparency}
               image={image} onImageUpload={handleImageUpload}
               colorGroups={colorGroups} manualLayerIds={manualLayerIds}
               selectedInGroup={selectedInGroup} enabledGroups={enabledGroups} setEnabledGroups={setEnabledGroups}
