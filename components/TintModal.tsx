@@ -55,7 +55,7 @@ export const TintModal: React.FC<TintModalProps> = ({
   return (
     <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md md:max-w-2xl flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Hue Tint Settings</h3>
+        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Tint Settings</h3>
         <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-slate-100 hover:text-slate-600 transition-colors">
           <i className="fa-solid fa-xmark text-sm"></i>
         </button>

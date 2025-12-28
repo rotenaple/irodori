@@ -545,7 +545,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
             <ExpandableInfoBox isOpen={activeInfos.has('recolormode')}>
               <strong>Palette:</strong> Replace each color group with a specific target color.<br />
-              <strong>Hue Tint:</strong> Shift all colors in a group to a new hue while preserving their original lightness and saturation variations.
+              <strong>Tint:</strong> Shift all colors in a group to a new hue.
             </ExpandableInfoBox>
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -564,7 +564,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                   }`}
               >
-                <i className="fa-solid fa-droplet mr-1"></i> Hue Tint
+                <i className="fa-solid fa-droplet mr-1"></i> Tint
               </button>
             </div>
           </div>
@@ -586,7 +586,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <p className="text-[10px] text-slate-500 leading-tight">
             {recolorMode === 'palette'
               ? 'Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.'
-              : 'Adjust the hue slider to shift all colors in a group while preserving their lightness/saturation.'}
+              : 'Adjust the hue of all colors in a group by setting a relative hue.'}
           </p>
         </div>
       </div>

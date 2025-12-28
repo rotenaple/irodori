@@ -15,26 +15,24 @@ import {
 } from './utils/colorUtils';
 
 /**
- * Apply tint to an RGB color with full HSL adjustments and individual force values.
- * @param r - Red component (0-255)
- * @param g - Green component (0-255)
- * @param b - Blue component (0-255)
+ * Apply tint to HSL values.
+ * @param h - Hue (0-360)
+ * @param s - Saturation (0-100)
+ * @param l - Lightness (0-100)
  * @param baseHue - The reference hue of the color group (0-360)
- * @param tint - The tint settings (hue, saturation shift, lightness shift, individual forces)
+ * @param tint - The tint settings
  * @returns The tinted color as RGB
  */
-function applyTintRGB(r: number, g: number, b: number, baseHue: number, tint: TintSettings): ColorRGB {
-    const hsl = rgbToHsl(r, g, b);
-
+function applyTintHSL(h: number, s: number, l: number, baseHue: number, tint: TintSettings): ColorRGB {
     // For achromatic colors (very low saturation), only apply lightness adjustment
-    if (hsl.s < 5) {
+    if (s < 5) {
         const lForce = tint.lightnessForce / 100;
-        const adjustedL = Math.max(0, Math.min(100, hsl.l + tint.lightness * lForce));
-        return hslToRgb(hsl.h, hsl.s, adjustedL);
+        const adjustedL = Math.max(0, Math.min(100, l + tint.lightness * lForce));
+        return hslToRgb(h, s, adjustedL);
     }
 
     // Calculate the hue offset from the group's base hue
-    const hueOffset = getHueDifference(baseHue, hsl.h);
+    const hueOffset = getHueDifference(baseHue, h);
 
     // Apply the same offset to the target hue
     const targetHue = shiftHue(tint.hue, hueOffset);
@@ -45,17 +43,31 @@ function applyTintRGB(r: number, g: number, b: number, baseHue: number, tint: Ti
     const lForce = tint.lightnessForce / 100;
 
     // Blend hue based on hueForce
-    const newHue = hForce < 1 ? hsl.h + (targetHue - hsl.h) * hForce : targetHue;
+    const newHue = hForce < 1 ? h + (targetHue - h) * hForce : targetHue;
 
     // Apply saturation shift with saturationForce
     const saturationShift = tint.saturation * sForce;
-    const newS = Math.max(0, Math.min(100, hsl.s + saturationShift));
+    const newS = Math.max(0, Math.min(100, s + saturationShift));
 
     // Apply lightness shift with lightnessForce
     const lightnessShift = tint.lightness * lForce;
-    const newL = Math.max(0, Math.min(100, hsl.l + lightnessShift));
+    const newL = Math.max(0, Math.min(100, l + lightnessShift));
 
     return hslToRgb(newHue, newS, newL);
+}
+
+/**
+ * Apply tint to an RGB color with full HSL adjustments and individual force values.
+ * @param r - Red component (0-255)
+ * @param g - Green component (0-255)
+ * @param b - Blue component (0-255)
+ * @param baseHue - The reference hue of the color group (0-360)
+ * @param tint - The tint settings (hue, saturation shift, lightness shift, individual forces)
+ * @returns The tinted color as RGB
+ */
+function applyTintRGB(r: number, g: number, b: number, baseHue: number, tint: TintSettings): ColorRGB {
+    const hsl = rgbToHsl(r, g, b);
+    return applyTintHSL(hsl.h, hsl.s, hsl.l, baseHue, tint);
 }
 
 /**
@@ -600,33 +612,30 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const paletteTargetG = new Uint8Array(paletteSize);
         const paletteTargetB = new Uint8Array(paletteSize);
 
-        // Pre-cache base hues and tint settings for tint mode
-        const paletteBaseHue = new Float32Array(paletteSize);
-        const paletteTintSettings: (TintSettings | null)[] = new Array(paletteSize).fill(null);
-        const paletteHasTint = new Uint8Array(paletteSize); // 1 if this palette entry has a tint override
-
         const isTintMode = recolorMode === 'tint' && tintOverrides;
 
         for (let i = 0; i < paletteSize; i++) {
             const p = matchPalette[i];
 
             if (isTintMode) {
-                // Tint mode: cache base hue and tint settings
+                // Tint mode: Calculate the target color based on the group's tint settings
                 const tint = tintOverrides![p.id];
                 if (tint !== undefined) {
                     const group = parameters.colorGroups?.find(g => g.id === p.id);
-                    paletteBaseHue[i] = group?.baseHue ?? 0;
-                    paletteTintSettings[i] = tint;
-                    paletteHasTint[i] = 1;
+                    const baseHue = group?.baseHue ?? 0;
+                    // Apply tint to the PALETTE color (the reliable source)
+                    const tinted = applyTintRGB(p.r, p.g, p.b, baseHue, tint);
+                    paletteTargetR[i] = tinted.r;
+                    paletteTargetG[i] = tinted.g;
+                    paletteTargetB[i] = tinted.b;
                 } else {
-                    paletteHasTint[i] = 0;
+                    // No tint: Target is the original palette color
+                    paletteTargetR[i] = paletteR[i];
+                    paletteTargetG[i] = paletteG[i];
+                    paletteTargetB[i] = paletteB[i];
                 }
-                // Still cache palette colors for non-tinted groups
-                paletteTargetR[i] = paletteR[i];
-                paletteTargetG[i] = paletteG[i];
-                paletteTargetB[i] = paletteB[i];
             } else {
-                // Palette mode: direct color replacement
+                // Palette mode: Direct color replacement
                 if (p.targetHex) {
                     const rgb = hexToRgb(p.targetHex);
                     if (rgb) {
@@ -639,7 +648,6 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         paletteTargetB[i] = paletteB[i];
                     }
                 } else {
-                    // If no targetHex, use the source color (paletteR/G/B)
                     paletteTargetR[i] = paletteR[i];
                     paletteTargetG[i] = paletteG[i];
                     paletteTargetB[i] = paletteB[i];
@@ -834,18 +842,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 let finalR: number, finalG: number, finalB: number;
 
                 if (blendA === blendB) {
-                    if (isTintMode) {
-                        if (paletteHasTint[blendA] && paletteTintSettings[blendA]) {
-                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[blendA], paletteTintSettings[blendA]!);
-                            finalR = tinted.r; finalG = tinted.g; finalB = tinted.b;
-                        } else {
-                            finalR = refR; finalG = refG; finalB = refB;
-                        }
-                    } else {
-                        finalR = paletteTargetR[blendA];
-                        finalG = paletteTargetG[blendA];
-                        finalB = paletteTargetB[blendA];
-                    }
+                    finalR = paletteTargetR[blendA];
+                    finalG = paletteTargetG[blendA];
+                    finalB = paletteTargetB[blendA];
                 } else if (effectiveSmoothingLevels === 0) {
                     const p1R = paletteR[blendA], p1G = paletteG[blendA], p1B = paletteB[blendA];
                     const p2R = paletteR[blendB], p2G = paletteG[blendB], p2B = paletteB[blendB];
@@ -855,18 +854,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const dist2 = dr2 * dr2 + dg2 * dg2 + db2 * db2;
                     const winnerIdx = dist1 < dist2 ? blendA : blendB;
 
-                    if (isTintMode) {
-                        if (paletteHasTint[winnerIdx] && paletteTintSettings[winnerIdx]) {
-                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[winnerIdx], paletteTintSettings[winnerIdx]!);
-                            finalR = tinted.r; finalG = tinted.g; finalB = tinted.b;
-                        } else {
-                            finalR = refR; finalG = refG; finalB = refB;
-                        }
-                    } else {
-                        finalR = paletteTargetR[winnerIdx];
-                        finalG = paletteTargetG[winnerIdx];
-                        finalB = paletteTargetB[winnerIdx];
-                    }
+                    finalR = paletteTargetR[winnerIdx];
+                    finalG = paletteTargetG[winnerIdx];
+                    finalB = paletteTargetB[winnerIdx];
                 } else {
                     const c1R = paletteR[blendA], c1G = paletteG[blendA], c1B = paletteB[blendA];
                     const c2R = paletteR[blendB], c2G = paletteG[blendB], c2B = paletteB[blendB];
@@ -946,39 +936,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const rawS = 1 / (1 + Math.exp(-k * (bestT - 0.5)));
                     const finalT = (rawS - s0) / (s1 - s0);
 
-                    // For tint mode, apply tint to ORIGINAL source pixel, then blend
-                    if (isTintMode) {
-                        // Tint the source pixel based on each group's tint settings, then blend
-                        let t1R: number, t1G: number, t1B: number;
-                        let t2R: number, t2G: number, t2B: number;
-
-                        if (paletteHasTint[blendA] && paletteTintSettings[blendA]) {
-                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[blendA], paletteTintSettings[blendA]!);
-                            t1R = tinted.r; t1G = tinted.g; t1B = tinted.b;
-                        } else {
-                            // No tint: use original source pixel color
-                            t1R = refR; t1G = refG; t1B = refB;
-                        }
-
-                        if (paletteHasTint[blendB] && paletteTintSettings[blendB]) {
-                            const tinted = applyTintRGB(refR, refG, refB, paletteBaseHue[blendB], paletteTintSettings[blendB]!);
-                            t2R = tinted.r; t2G = tinted.g; t2B = tinted.b;
-                        } else {
-                            // No tint: use original source pixel color
-                            t2R = refR; t2G = refG; t2B = refB;
-                        }
-
-                        finalR = Math.round(t1R + finalT * (t2R - t1R));
-                        finalG = Math.round(t1G + finalT * (t2G - t1G));
-                        finalB = Math.round(t1B + finalT * (t2B - t1B));
-                    } else {
-                        // Palette mode: blend target colors
-                        const t1R = paletteTargetR[blendA], t1G = paletteTargetG[blendA], t1B = paletteTargetB[blendA];
-                        const t2R = paletteTargetR[blendB], t2G = paletteTargetG[blendB], t2B = paletteTargetB[blendB];
-                        finalR = Math.round(t1R + finalT * (t2R - t1R));
-                        finalG = Math.round(t1G + finalT * (t2G - t1G));
-                        finalB = Math.round(t1B + finalT * (t2B - t1B));
-                    }
+                    // Unified blending logic for both Palette and Tint modes
+                    // Since we pre-calculated paletteTargetR/G/B, we just blend between them.
+                    const t1R = paletteTargetR[blendA], t1G = paletteTargetG[blendA], t1B = paletteTargetB[blendA];
+                    const t2R = paletteTargetR[blendB], t2G = paletteTargetG[blendB], t2B = paletteTargetB[blendB];
+                    finalR = Math.round(t1R + finalT * (t2R - t1R));
+                    finalG = Math.round(t1G + finalT * (t2G - t1G));
+                    finalB = Math.round(t1B + finalT * (t2B - t1B));
                 }
 
 
