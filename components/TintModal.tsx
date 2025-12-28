@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { TintSettings, ColorInstance } from '../types';
-import { hslToRgb, rgbToHex, hexToRgb, rgbToHsl, applyTintToHex } from '../utils/colorUtils';
+import { hslToRgb, rgbToHex, applyTintToHex } from '../utils/colorUtils';
 
 interface TintModalProps {
   groupId: string;
@@ -50,7 +50,7 @@ export const TintModal: React.FC<TintModalProps> = ({
     const rect = canvas.getBoundingClientRect();
     const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
     const x = Math.max(0, Math.min(canvas.width - 1, ((clientX - rect.left) / rect.width) * canvas.width));
-    const newHue = Math.round((x / canvas.width) * 360);
+    const newHue = Math.min(359, Math.round((x / canvas.width) * 360));
     setHue(newHue);
   };
 

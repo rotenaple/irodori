@@ -160,7 +160,8 @@ interface ControlPanelProps {
   recolorMode: RecolorMode;
   setRecolorMode: (v: RecolorMode) => void;
   tintOverrides: Record<string, TintSettings>;
-  setTintOverrides: React.Dispatch<React.SetStateAction<Record<string, TintSettings>>>; setTintModalGroupId: (id: string | null) => void;
+  setTintOverrides: React.Dispatch<React.SetStateAction<Record<string, TintSettings>>>;
+  setTintModalGroupId: (id: string | null) => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -713,6 +714,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           </div>
         )}
       </div>
-    </div >
+    </div>
   );
 };

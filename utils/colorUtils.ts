@@ -1,4 +1,4 @@
-import { ColorRGB, PaletteColor, ColorGroup, ColorInstance, ColorHSL, TintSettings } from '../types';
+import { ColorRGB, PaletteColor, ColorGroup, ColorInstance, TintSettings } from '../types';
 
 export const rgbToHex = (r: number, g: number, b: number): string => {
   const componentToHex = (c: number) => {

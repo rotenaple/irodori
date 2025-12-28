@@ -1,4 +1,4 @@
-import { PaletteColor, ColorRGB, WorkerMessage, RecolorMode, TintSettings } from './types';
+import { ColorRGB, WorkerMessage, TintSettings } from './types';
 import {
     rgbToHex,
     hexToRgb,
@@ -832,17 +832,6 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
                 let finalR: number, finalG: number, finalB: number;
-
-                // Helper function to get the final color for a palette index
-                // In tint mode, applies tint to reference pixel; in palette mode, uses target color
-                const getFinalColor = (pIdx: number, srcR: number, srcG: number, srcB: number): ColorRGB => {
-                    if (isTintMode) {
-                        return (paletteHasTint[pIdx] && paletteTintSettings[pIdx])
-                            ? applyTintRGB(srcR, srcG, srcB, paletteBaseHue[pIdx], paletteTintSettings[pIdx]!)
-                            : { r: srcR, g: srcG, b: srcB };
-                    }
-                    return { r: paletteTargetR[pIdx], g: paletteTargetG[pIdx], b: paletteTargetB[pIdx] };
-                };
 
                 if (blendA === blendB) {
                     if (isTintMode) {

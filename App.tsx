@@ -66,7 +66,9 @@ const App: React.FC = () => {
   const [originalSize, setOriginalSize] = useState<number>(0);
   const [processedSize, setProcessedSize] = useState<number>(0);
 
-  const [editTarget, setEditTarget] = useState<{ id: string, type: 'original' | 'recolor' } | null>(null); const [tintModalGroupId, setTintModalGroupId] = useState<string | null>(null); const [hoveredColor, setHoveredColor] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<{ id: string, type: 'original' | 'recolor' } | null>(null);
+  const [tintModalGroupId, setTintModalGroupId] = useState<string | null>(null);
+  const [hoveredColor, setHoveredColor] = useState<string | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
 
   // NEW: State for Mobile View Selection
@@ -251,7 +253,8 @@ const App: React.FC = () => {
         if (isTargetManual) {
           // Convert manual layer to regular group by adding this color AND the manual color as a member
           const targetHex = selectedInGroup[targetGroupId] || '#ffffff';
-          const manualMember: ColorInstance = { hex: targetHex, count: 0, rgb: hexToRgb(targetHex)! }; // Synthetic member for manual layer
+          const manualRgb = hexToRgb(targetHex) ?? { r: 255, g: 255, b: 255 };
+          const manualMember: ColorInstance = { hex: targetHex, count: 0, rgb: manualRgb }; // Synthetic member for manual layer
 
           const newGroup: ColorGroup = {
             id: targetGroupId,
@@ -301,8 +304,16 @@ const App: React.FC = () => {
         const targetHex = selectedInGroup[targetGroupId] || '#ffffff';
         const sourceHex = selectedInGroup[sourceGroupId] || '#ffffff';
 
-        const manualMemberTarget: ColorInstance = { hex: targetHex, count: 0, rgb: hexToRgb(targetHex)! };
-        const manualMemberSource: ColorInstance = { hex: sourceHex, count: 0, rgb: hexToRgb(sourceHex)! };
+        const targetRgb = hexToRgb(targetHex);
+        const sourceRgb = hexToRgb(sourceHex);
+        if (!targetRgb || !sourceRgb) {
+          // If either hex value is invalid, abort this merge to avoid runtime errors.
+          console.error('Invalid hex color when merging manual groups', { targetHex, sourceHex });
+          return;
+        }
+
+        const manualMemberTarget: ColorInstance = { hex: targetHex, count: 0, rgb: targetRgb };
+        const manualMemberSource: ColorInstance = { hex: sourceHex, count: 0, rgb: sourceRgb };
 
         const newGroup: ColorGroup = {
           id: targetGroupId,
@@ -348,7 +359,12 @@ const App: React.FC = () => {
       const sourceTintOverride = tintOverrides[sourceGroupId];
 
       // Add synthetic member for the target manual layer
-      const manualMemberTarget: ColorInstance = { hex: targetHex, count: 0, rgb: hexToRgb(targetHex)! };
+      const targetRgb = hexToRgb(targetHex);
+      if (!targetRgb) {
+        // If the hex color is invalid, leave color groups unchanged
+        return prev;
+      }
+      const manualMemberTarget: ColorInstance = { hex: targetHex, count: 0, rgb: targetRgb };
 
       const newMembers = [manualMemberTarget, ...sourceGroup.members];
       const newGroup: ColorGroup = {
@@ -394,7 +410,12 @@ const App: React.FC = () => {
         if (!isSourceManual) return prev; // Should be impossible if logic holds
 
         const sourceHex = selectedInGroup[sourceGroupId] || '#ffffff';
-        const manualMemberSource: ColorInstance = { hex: sourceHex, count: 0, rgb: hexToRgb(sourceHex)! };
+        const rgb = hexToRgb(sourceHex);
+        if (!rgb) {
+          // If the hex color is invalid, leave color groups unchanged
+          return prev;
+        }
+        const manualMemberSource: ColorInstance = { hex: sourceHex, count: 0, rgb };
 
         return prev.map(g => {
           if (g.id === targetGroupId) {
