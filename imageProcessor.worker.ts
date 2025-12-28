@@ -112,12 +112,139 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         disableScaling,
         palette,
         smoothingLevels,
-        alphaSmoothness
+        alphaSmoothness,
+        preserveTransparency,
+        pixelArtConfig
     } = parameters;
 
     try {
         const nativeWidth = imageBitmap.width;
         const nativeHeight = imageBitmap.height;
+
+        // PIXEL ART MODE - Handle separately with different processing
+        if (pixelArtConfig?.enabled) {
+            const { pixelWidth, pixelHeight, offsetX, offsetY } = pixelArtConfig;
+            
+            // Calculate pixelated dimensions
+            const pixelCols = Math.ceil(nativeWidth / pixelWidth);
+            const pixelRows = Math.ceil(nativeHeight / pixelHeight);
+            
+            // Create canvas at native resolution for sampling
+            const sourceCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
+            const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
+            if (!sourceCtx) throw new Error("Could not get source context");
+            sourceCtx.imageSmoothingEnabled = false; // Disable antialiasing
+            sourceCtx.drawImage(imageBitmap, 0, 0);
+            const sourceData = sourceCtx.getImageData(0, 0, nativeWidth, nativeHeight);
+            
+            // Create pixelated canvas
+            const pixelCanvas = new OffscreenCanvas(pixelCols, pixelRows);
+            const pixelCtx = pixelCanvas.getContext('2d');
+            if (!pixelCtx) throw new Error("Could not get pixel context");
+            const pixelImageData = pixelCtx.createImageData(pixelCols, pixelRows);
+            
+            // Sample majority color for each pixel block
+            for (let py = 0; py < pixelRows; py++) {
+                for (let px = 0; px < pixelCols; px++) {
+                    const colorCounts = new Map<string, { count: number; r: number; g: number; b: number; a: number }>();
+                    
+                    // Sample all pixels in this block with offset
+                    const startX = px * pixelWidth + offsetX;
+                    const startY = py * pixelHeight + offsetY;
+                    const endX = Math.min(startX + pixelWidth, nativeWidth);
+                    const endY = Math.min(startY + pixelHeight, nativeHeight);
+                    
+                    for (let sy = startY; sy < endY; sy++) {
+                        for (let sx = startX; sx < endX; sx++) {
+                            const idx = (sy * nativeWidth + sx) * 4;
+                            const r = sourceData.data[idx];
+                            const g = sourceData.data[idx + 1];
+                            const b = sourceData.data[idx + 2];
+                            const a = sourceData.data[idx + 3];
+                            
+                            const key = `${r},${g},${b},${a}`;
+                            const existing = colorCounts.get(key);
+                            if (existing) {
+                                existing.count++;
+                            } else {
+                                colorCounts.set(key, { count: 1, r, g, b, a });
+                            }
+                        }
+                    }
+                    
+                    // Find majority color
+                    let maxCount = 0;
+                    let majorityColor = { r: 0, g: 0, b: 0, a: 255 };
+                    for (const color of colorCounts.values()) {
+                        if (color.count > maxCount) {
+                            maxCount = color.count;
+                            majorityColor = color;
+                        }
+                    }
+                    
+                    // Apply recoloring if enabled
+                    let finalColor = majorityColor;
+                    if (!disableRecoloring && palette.length > 0) {
+                        // Find closest palette color
+                        const sourceRGB = { r: majorityColor.r, g: majorityColor.g, b: majorityColor.b };
+                        const closest = findClosestColor(sourceRGB, palette);
+                        if (closest.targetHex) {
+                            const targetRGB = hexToRgb(closest.targetHex);
+                            if (targetRGB) {
+                                finalColor = { ...targetRGB, a: majorityColor.a }; // Preserve alpha
+                            }
+                        }
+                    }
+                    
+                    // Set pixel color
+                    const pixelIdx = (py * pixelCols + px) * 4;
+                    pixelImageData.data[pixelIdx] = finalColor.r;
+                    pixelImageData.data[pixelIdx + 1] = finalColor.g;
+                    pixelImageData.data[pixelIdx + 2] = finalColor.b;
+                    pixelImageData.data[pixelIdx + 3] = preserveTransparency ? finalColor.a : 255;
+                }
+            }
+            
+            pixelCtx.putImageData(pixelImageData, 0, 0);
+            
+            // Determine integer upscale factor - find largest integer that fits in target
+            let finalScale = 1;
+            if (!disableScaling) {
+                let targetWidth: number;
+                let targetHeight: number;
+                
+                if (upscaleFactor === 'NS') {
+                    // Auto-scale to fit NationStates dimensions
+                    const isLandscape = nativeWidth >= nativeHeight;
+                    targetWidth = isLandscape ? 535 : 321;
+                    targetHeight = isLandscape ? 355 : 568;
+                } else {
+                    // Use upscale factor as maximum dimension multiplier
+                    const scale = upscaleFactor as number;
+                    targetWidth = nativeWidth * scale;
+                    targetHeight = nativeHeight * scale;
+                }
+                
+                // Find largest integer scale that fits within target dimensions
+                const maxScaleX = Math.floor(targetWidth / pixelCols);
+                const maxScaleY = Math.floor(targetHeight / pixelRows);
+                finalScale = Math.max(1, Math.min(maxScaleX, maxScaleY));
+            }
+            
+            // Create final canvas with nearest-neighbor scaling (no smoothing)
+            const finalWidth = pixelCols * finalScale;
+            const finalHeight = pixelRows * finalScale;
+            const finalCanvas = new OffscreenCanvas(finalWidth, finalHeight);
+            const finalCtx = finalCanvas.getContext('2d');
+            if (!finalCtx) throw new Error("Could not get final context");
+            
+            finalCtx.imageSmoothingEnabled = false; // Critical for pixel art
+            finalCtx.drawImage(pixelCanvas, 0, 0, finalWidth, finalHeight);
+            
+            const blob = await intelligentCompress(finalCanvas, upscaleFactor === 'NS');
+            self.postMessage({ type: 'complete', result: blob });
+            return;
+        }
 
         // determine target scale
         let targetUpscale = 1;
@@ -742,7 +869,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 outputData[outIdx] = finalR;
                 outputData[outIdx + 1] = finalG;
                 outputData[outIdx + 2] = finalB;
-                outputData[outIdx + 3] = finalAlpha;
+                outputData[outIdx + 3] = preserveTransparency ? finalAlpha : 255;
             }
         }
 
