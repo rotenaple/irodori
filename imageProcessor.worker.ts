@@ -111,7 +111,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         disableRecoloring,
         disableScaling,
         palette,
-        smoothingLevels
+        smoothingLevels,
+        alphaSmoothness
     } = parameters;
 
     try {
@@ -138,7 +139,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
         const nativeCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
-        const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true });
+        const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
         if (!nCtx) throw new Error("Could not get native context");
 
         nCtx.drawImage(imageBitmap, 0, 0);
@@ -174,6 +175,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         // --- PHASE 1: LOW-RES SOLVE (Original Resolution) ---
         const nativePixelData = nCtx.getImageData(0, 0, nativeWidth, nativeHeight).data;
         let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
+        
+        // Store original alpha channel at native resolution for nearest-neighbor lookup
+        const nativeAlpha = new Uint8ClampedArray(nativeWidth * nativeHeight);
+        for (let i = 0; i < nativePixelData.length; i += 4) {
+            nativeAlpha[i / 4] = nativePixelData[i + 3];
+        }
 
         // 1. Setup Maps for Fast Lookup
         // We use a map to link specific hex codes directly to a palette index.
@@ -375,7 +382,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const finalWorkspaceHeight = Math.round(nativeHeight * safeScale);
 
         const workspaceCanvas = new OffscreenCanvas(finalWorkspaceWidth, finalWorkspaceHeight);
-        const wCtx = workspaceCanvas.getContext('2d', { willReadFrequently: true });
+        const wCtx = workspaceCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
         if (!wCtx) throw new Error("Could not get workspace context");
 
         wCtx.imageSmoothingEnabled = true;
@@ -701,10 +708,41 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
 
+                // Use nearest-neighbor lookup for alpha from native resolution
+                const nativeAlphaIdx = ly * nativeWidth + lx;
+                const sharpAlpha = nativeAlpha[nativeAlphaIdx];
+                const smoothAlpha = highResPixelData[outIdx + 3];
+                
+                let finalAlpha: number;
+                const alphaIntensity = (alphaSmoothness || 0) / 100;
+                
+                if (alphaIntensity === 0) {
+                    // Binary snap: pure nearest-neighbor
+                    finalAlpha = sharpAlpha;
+                } else {
+                    // Apply sigmoid to interpolated alpha value
+                    // Normalize to 0-1 range
+                    const alphaNorm = smoothAlpha / 255;
+                    
+                    // Sigmoid sharpness: k increases with lower alphaSmoothness
+                    // At 10%: k=20 (very sharp, nearly binary)
+                    // At 50%: k=8 (moderate smoothing)
+                    // At 100%: k=2 (gentle smoothing)
+                    const k = 20 * (1 - alphaIntensity) + 2 * alphaIntensity;
+                    
+                    // Apply sigmoid centered at 0.5
+                    const s0 = 1 / (1 + Math.exp(-k * (-0.5)));
+                    const s1 = 1 / (1 + Math.exp(-k * (0.5)));
+                    const rawS = 1 / (1 + Math.exp(-k * (alphaNorm - 0.5)));
+                    const sigmoidAlpha = (rawS - s0) / (s1 - s0);
+                    
+                    finalAlpha = Math.round(sigmoidAlpha * 255);
+                }
+                
                 outputData[outIdx] = finalR;
                 outputData[outIdx + 1] = finalG;
                 outputData[outIdx + 2] = finalB;
-                outputData[outIdx + 3] = 255;
+                outputData[outIdx + 3] = finalAlpha;
             }
         }
 
@@ -712,11 +750,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         wCtx.putImageData(new ImageData(outputData, finalWorkspaceWidth, finalWorkspaceHeight), 0, 0);
 
         const finalCanvas = new OffscreenCanvas(Math.round(nativeWidth * targetUpscale), Math.round(nativeHeight * targetUpscale));
-        const fCtx = finalCanvas.getContext('2d');
+        const fCtx = finalCanvas.getContext('2d', { alpha: true });
         if (!fCtx) throw new Error("Could not get final context");
 
-        fCtx.fillStyle = '#000000';
-        fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
         fCtx.imageSmoothingEnabled = true;
         fCtx.imageSmoothingQuality = 'high';
         fCtx.drawImage(workspaceCanvas, 0, 0, finalCanvas.width, finalCanvas.height);

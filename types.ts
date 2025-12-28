@@ -50,6 +50,7 @@ export type WorkerMessage = {
     selectedInGroup: Record<string, string>;
     smoothingLevels: number;
     vertexInertia: number;
+    alphaSmoothness: number;
   };
   svgContent?: string;
 };

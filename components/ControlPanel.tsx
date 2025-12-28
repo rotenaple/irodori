@@ -120,6 +120,9 @@ interface ControlPanelProps {
   setEdgeProtection: (v: number) => void;
   colorGroupingDistance: number;
   setColorGroupingDistance: (v: number) => void;
+  alphaSmoothness: number;
+  setAlphaSmoothness: (v: number) => void;
+  hasTransparency: boolean;
   image: string | null;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   colorGroups: ColorGroup[];
@@ -155,6 +158,7 @@ interface ControlPanelProps {
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   upscaleFactor, setUpscaleFactor, denoiseRadius, setDenoiseRadius, smoothingLevels, setSmoothingLevels,
   vertexInertia, setVertexInertia, edgeProtection, setEdgeProtection, colorGroupingDistance, setColorGroupingDistance,
+  alphaSmoothness, setAlphaSmoothness, hasTransparency,
   image, onImageUpload,
   colorGroups, manualLayerIds, selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget, onMoveColor, onMergeGroups, onRecomputeGroups,
@@ -229,7 +233,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     { label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
     { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
     { label: 'Corner Protection', val: vertexInertia, set: setVertexInertia, max: 100, step: 10, info: 'inertia', desc: 'Preserves sharp vertices.' },
-    { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' }
+    { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' },
+    ...(hasTransparency ? [{ label: 'Alpha Smoothing', val: alphaSmoothness, set: setAlphaSmoothness, max: 100, step: 5, info: 'alpha', desc: 'Controls transparency edge smoothing. 0% = sharp edges (preserves exact alpha), 100% = smooth edges (interpolated alpha).' }] : [])
   ];
 
   return (
