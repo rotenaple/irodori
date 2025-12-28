@@ -1,4 +1,4 @@
-import { ColorRGB, PaletteColor, ColorGroup, ColorInstance, TintSettings } from '../types';
+import { ColorRGB, PaletteColor, ColorGroup, ColorInstance, ColorHSL, TintSettings } from '../types';
 
 export const rgbToHex = (r: number, g: number, b: number): string => {
   const componentToHex = (c: number) => {
@@ -453,7 +453,6 @@ export const recolorSvg = (
   svgContent: string, 
   colorGroups: ColorGroup[], 
   colorOverrides: Record<string, string>,
-  recolorMode: 'palette' | 'tint' = 'palette',
   tintOverrides?: Record<string, TintSettings>
 ): string => {
   // Create a mapping from any found color string to its new target hex
@@ -462,21 +461,21 @@ export const recolorSvg = (
   const colorToGroupInfo: Record<string, { baseHue: number, tint: TintSettings }> = {};
 
   for (const group of colorGroups) {
-    if (recolorMode === 'tint' && tintOverrides) {
-      // Tint mode: use tint settings
+    // 1. Palette Override
+    const target = colorOverrides[group.id];
+    if (target) {
+      for (const member of group.members) {
+        colorToTarget[member.hex.toLowerCase()] = target;
+      }
+    }
+
+    // 2. Tint Override
+    if (tintOverrides) {
       const tint = tintOverrides[group.id];
       if (tint !== undefined) {
         const baseHue = group.baseHue ?? calculateGroupBaseHue(group.members);
         for (const member of group.members) {
           colorToGroupInfo[member.hex.toLowerCase()] = { baseHue, tint };
-        }
-      }
-    } else {
-      // Palette mode: direct color replacement
-      const target = colorOverrides[group.id];
-      if (target) {
-        for (const member of group.members) {
-          colorToTarget[member.hex.toLowerCase()] = target;
         }
       }
     }
@@ -485,15 +484,17 @@ export const recolorSvg = (
   // Helper to apply transformation based on mode
   const transformColor = (hex: string): string => {
     const lowerHex = hex.toLowerCase();
-    if (recolorMode === 'tint') {
-      const groupInfo = colorToGroupInfo[lowerHex];
-      if (groupInfo) {
-        return applyTintToHex(lowerHex, groupInfo.baseHue, groupInfo.tint);
-      }
-      return hex;
-    } else {
-      return colorToTarget[lowerHex] || hex;
+    
+    // 1. Apply Palette Override
+    let currentHex = colorToTarget[lowerHex] || hex;
+    
+    // 2. Apply Tint Override
+    const groupInfo = colorToGroupInfo[lowerHex];
+    if (groupInfo) {
+      return applyTintToHex(currentHex, groupInfo.baseHue, groupInfo.tint);
     }
+    
+    return currentHex;
   };
 
   // Replace hex colors

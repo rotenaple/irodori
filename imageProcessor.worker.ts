@@ -253,28 +253,28 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         const sourceRGB = { r: majorityColor.r, g: majorityColor.g, b: majorityColor.b };
                         const closest = findClosestColor(sourceRGB, palette);
 
-                        if (recolorMode === 'tint' && tintOverrides) {
-                            // Tint mode: apply tint if set, otherwise keep original color
-                            const tint = tintOverrides[closest.id];
-                            if (tint !== undefined) {
-                                // Get base hue for the group
-                                const group = parameters.colorGroups?.find(g => g.id === closest.id);
-                                const baseHue = group?.baseHue ?? 0;
-                                const tinted = applyTintRGB(majorityColor.r, majorityColor.g, majorityColor.b, baseHue, tint);
-                                finalColor = { ...tinted, a: majorityColor.a };
+                        // Combined Mode Logic
+                        
+                        // 1. Palette Override
+                        if (closest.targetHex) {
+                            const targetRGB = hexToRgb(closest.targetHex);
+                            if (targetRGB) {
+                                finalColor = { ...targetRGB, a: majorityColor.a };
                             }
-                            // If no tint override, keep original color (finalColor = majorityColor)
                         } else {
-                            // Palette mode: use target color if set, otherwise use the matched source color from palette
-                            if (closest.targetHex) {
-                                const targetRGB = hexToRgb(closest.targetHex);
-                                if (targetRGB) {
-                                    finalColor = { ...targetRGB, a: majorityColor.a }; // Recolor to target
-                                }
-                            } else {
-                                // Use the matched palette color (closest.r/g/b are the source color)
-                                finalColor = { r: closest.r, g: closest.g, b: closest.b, a: majorityColor.a };
-                            }
+                            // If no override, consolidate to the closest palette color
+                            finalColor = { r: closest.r, g: closest.g, b: closest.b, a: majorityColor.a };
+                        }
+
+                        // 2. Tint Override
+                        if (tintOverrides && tintOverrides[closest.id] !== undefined) {
+                            const tint = tintOverrides[closest.id];
+                            const group = parameters.colorGroups?.find(g => g.id === closest.id);
+                            const baseHue = group?.baseHue ?? 0;
+                            
+                            // Apply tint to the CURRENT finalColor (which might be the override)
+                            const tinted = applyTintRGB(finalColor.r, finalColor.g, finalColor.b, baseHue, tint);
+                            finalColor = { ...tinted, a: finalColor.a };
                         }
                     }
 
@@ -612,47 +612,41 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const paletteTargetG = new Uint8Array(paletteSize);
         const paletteTargetB = new Uint8Array(paletteSize);
 
-        const isTintMode = recolorMode === 'tint' && tintOverrides;
-
+        // Combined Mode: Apply Palette Override first, then Tint Override
         for (let i = 0; i < paletteSize; i++) {
             const p = matchPalette[i];
+            
+            // Start with original color
+            let r = p.r;
+            let g = p.g;
+            let b = p.b;
 
-            if (isTintMode) {
-                // Tint mode: Calculate the target color based on the group's tint settings
-                const tint = tintOverrides![p.id];
-                if (tint !== undefined) {
-                    const group = parameters.colorGroups?.find(g => g.id === p.id);
-                    const baseHue = group?.baseHue ?? 0;
-                    // Apply tint to the PALETTE color (the reliable source)
-                    const tinted = applyTintRGB(p.r, p.g, p.b, baseHue, tint);
-                    paletteTargetR[i] = tinted.r;
-                    paletteTargetG[i] = tinted.g;
-                    paletteTargetB[i] = tinted.b;
-                } else {
-                    // No tint: Target is the original palette color
-                    paletteTargetR[i] = paletteR[i];
-                    paletteTargetG[i] = paletteG[i];
-                    paletteTargetB[i] = paletteB[i];
-                }
-            } else {
-                // Palette mode: Direct color replacement
-                if (p.targetHex) {
-                    const rgb = hexToRgb(p.targetHex);
-                    if (rgb) {
-                        paletteTargetR[i] = rgb.r;
-                        paletteTargetG[i] = rgb.g;
-                        paletteTargetB[i] = rgb.b;
-                    } else {
-                        paletteTargetR[i] = paletteR[i];
-                        paletteTargetG[i] = paletteG[i];
-                        paletteTargetB[i] = paletteB[i];
-                    }
-                } else {
-                    paletteTargetR[i] = paletteR[i];
-                    paletteTargetG[i] = paletteG[i];
-                    paletteTargetB[i] = paletteB[i];
+            // 1. Apply Palette Override if exists
+            if (p.targetHex) {
+                const rgb = hexToRgb(p.targetHex);
+                if (rgb) {
+                    r = rgb.r;
+                    g = rgb.g;
+                    b = rgb.b;
                 }
             }
+
+            // 2. Apply Tint Override if exists
+            if (tintOverrides && tintOverrides[p.id] !== undefined) {
+                const tint = tintOverrides[p.id];
+                const group = parameters.colorGroups?.find(g => g.id === p.id);
+                const baseHue = group?.baseHue ?? 0;
+                
+                // Apply tint to the current color (which might be the override)
+                const tinted = applyTintRGB(r, g, b, baseHue, tint);
+                r = tinted.r;
+                g = tinted.g;
+                b = tinted.b;
+            }
+
+            paletteTargetR[i] = r;
+            paletteTargetG[i] = g;
+            paletteTargetB[i] = b;
         }
 
         // Pre-allocate reusable arrays for pixel loop to reduce allocations

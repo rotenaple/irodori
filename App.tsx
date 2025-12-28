@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig, RecolorMode, TintSettings } from './types';
+import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig, RecolorMode, TintSettings, Supergroup } from './types';
 import {
   rgbToHex,
   hexToRgb,
@@ -56,8 +56,9 @@ const App: React.FC = () => {
   });
 
   // Recolor Mode State
-  const [recolorMode, setRecolorMode] = useState<RecolorMode>('palette');
+  // const [recolorMode, setRecolorMode] = useState<RecolorMode>('palette'); // Removed
   const [tintOverrides, setTintOverrides] = useState<Record<string, TintSettings>>({});
+  const [supergroups, setSupergroups] = useState<Supergroup[]>([]);
 
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
@@ -120,6 +121,7 @@ const App: React.FC = () => {
         setProcessedBlob(null);
         setProcessingState('idle');
         setColorGroups([]);
+        setSupergroups([]);
         setSelectedInGroup({});
         setEnabledGroups(new Set());
         setManualLayerIds([]);
@@ -193,7 +195,7 @@ const App: React.FC = () => {
 
           const initialSelections: Record<string, string> = {};
           const initialEnabled = new Set<string>();
-          significantGroups.slice(0, 6).forEach((g: ColorGroup) => {
+          significantGroups.forEach((g: ColorGroup) => {
             initialSelections[g.id] = g.representativeHex!;
             initialEnabled.add(g.id);
           });
@@ -490,6 +492,14 @@ const App: React.FC = () => {
       next.delete(sourceGroupId);
       return next;
     });
+
+    // Clean up Supergroups: Remove sourceGroupId from any supergroup
+    setSupergroups(prev => {
+      return prev.map(sg => ({
+        ...sg,
+        memberGroupIds: sg.memberGroupIds.filter(id => id !== sourceGroupId)
+      })).filter(sg => sg.memberGroupIds.length >= 2); // Disband if < 2
+    });
   };
 
 
@@ -531,15 +541,20 @@ const App: React.FC = () => {
     const p: PaletteColor[] = [];
     enabledGroups.forEach(id => {
       const baseHex = selectedInGroup[id];
-      // Logic Fix 1 & 2: Palette Mode Defaults & Tint Mode Isolation
-      // In Tint Mode, force targetHex to undefined to prevent overrides leakage.
-      // In Palette Mode, if no override, default to Representative Color (baseHex) to enforce consolidation.
-      let targetHex: string | undefined;
-
-      if (recolorMode === 'tint') {
-        targetHex = undefined;
-      } else {
-        targetHex = colorOverrides[id] || baseHex;
+      
+      // Determine targetHex based on overrides and tint status
+      // If explicit color override exists, use it.
+      // If not, check if tinted.
+      // If tinted, we preserve original colors (targetHex = undefined) to allow texture tinting.
+      // If NOT tinted, we consolidate to the representative color (targetHex = baseHex).
+      
+      let targetHex: string | undefined = colorOverrides[id];
+      
+      if (!targetHex) {
+          const isTinted = tintOverrides && tintOverrides[id] !== undefined;
+          if (!isTinted) {
+              targetHex = baseHex;
+          }
       }
 
       // Always add the base color if it exists
@@ -548,7 +563,7 @@ const App: React.FC = () => {
         if (rgb) p.push({ ...rgb, hex: baseHex, id, targetHex });
       }
 
-      // Add ALL member colors so they match to their correct group (both palette and tint modes)
+      // Add ALL member colors so they match to their correct group
       const group = colorGroups.find(g => g.id === id);
       if (group && group.members) {
         for (const member of group.members) {
@@ -563,7 +578,7 @@ const App: React.FC = () => {
       // If this is a manual layer (no group with members), the baseHex is already added above
     });
     return p;
-  }, [selectedInGroup, enabledGroups, colorOverrides, recolorMode, colorGroups]);
+  }, [selectedInGroup, enabledGroups, colorOverrides, tintOverrides, colorGroups]);
 
   const workerRef = useRef<Worker | null>(null);
 
@@ -594,7 +609,7 @@ const App: React.FC = () => {
 
     if (isSvg && svgContent) {
       try {
-        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides, recolorMode, tintOverrides);
+        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides, tintOverrides);
         const blob = new Blob([recoloredSvgContent], { type: 'image/svg+xml' });
         setProcessedSize(blob.size);
         setProcessedBlob(blob);
@@ -610,6 +625,15 @@ const App: React.FC = () => {
     const img = sourceImageRef.current;
     try {
       const imageBitmap = await createImageBitmap(img);
+
+      // Flatten supergroup tints into tintOverrides
+      const effectiveTintOverrides = { ...tintOverrides };
+      supergroups.forEach(sg => {
+        sg.memberGroupIds.forEach(gid => {
+          effectiveTintOverrides[gid] = sg.tint;
+        });
+      });
+
       workerRef.current.postMessage({
         type: 'process',
         imageBitmap,
@@ -629,8 +653,7 @@ const App: React.FC = () => {
           alphaSmoothness,
           preserveTransparency,
           pixelArtConfig,
-          recolorMode,
-          tintOverrides
+          tintOverrides: effectiveTintOverrides
         }
       }, [imageBitmap]);
     } catch (err) {
@@ -725,11 +748,11 @@ const App: React.FC = () => {
               onMobileViewToggle={handleMobileView}
               pixelArtConfig={pixelArtConfig}
               setPixelArtConfig={setPixelArtConfig}
-              recolorMode={recolorMode}
-              setRecolorMode={setRecolorMode}
               tintOverrides={tintOverrides}
               setTintOverrides={setTintOverrides}
               setTintModalGroupId={setTintModalGroupId}
+              supergroups={supergroups}
+              setSupergroups={setSupergroups}
             />
           </div>
           <div className="px-4 md:px-6 py-4 z-20">
@@ -793,24 +816,63 @@ const App: React.FC = () => {
       )}
       {tintModalGroupId && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm" onClick={() => setTintModalGroupId(null)}>
-          <TintModal
-            groupId={tintModalGroupId}
-            baseHue={colorGroups.find(g => g.id === tintModalGroupId)?.baseHue ?? 0}
-            currentSettings={tintOverrides[tintModalGroupId]}
-            colorMembers={colorGroups.find(g => g.id === tintModalGroupId)?.members ?? []}
-            onChange={(settings) => {
-              if (settings) {
-                setTintOverrides(prev => ({ ...prev, [tintModalGroupId]: settings }));
-              } else {
-                setTintOverrides(prev => {
-                  const next = { ...prev };
-                  delete next[tintModalGroupId];
-                  return next;
-                });
-              }
-            }}
-            onClose={() => setTintModalGroupId(null)}
-          />
+          {(() => {
+            const supergroup = supergroups.find(sg => sg.id === tintModalGroupId);
+            if (supergroup) {
+              // Collect representative colors from all member groups for preview
+              const members = supergroup.memberGroupIds.map(gid => {
+                 const group = colorGroups.find(g => g.id === gid);
+                 if (!group) return null;
+                 // Use the current canonical color (including manual overrides)
+                 const hex = selectedInGroup[gid] || group.representativeHex || group.members[0]?.hex || '#000000';
+                 return { hex, count: group.totalCount } as ColorInstance;
+              }).filter((m): m is ColorInstance => m !== null);
+
+              return (
+                <TintModal
+                  groupId={tintModalGroupId}
+                  baseHue={calculateGroupBaseHue(members)}
+                  currentSettings={supergroup.tint}
+                  colorMembers={members}
+                  onChange={(settings) => {
+                    if (settings) {
+                      setSupergroups(prev => prev.map(sg => sg.id === tintModalGroupId ? { ...sg, tint: settings } : sg));
+                    } else {
+                      // Handle removal of tint
+                      setSupergroups(prev => prev.map(sg => {
+                        if (sg.id === tintModalGroupId) {
+                          const { tint, ...rest } = sg;
+                          return rest;
+                        }
+                        return sg;
+                      }));
+                    }
+                  }}
+                  onClose={() => setTintModalGroupId(null)}
+                />
+              );
+            }
+            return (
+              <TintModal
+                groupId={tintModalGroupId}
+                baseHue={colorGroups.find(g => g.id === tintModalGroupId)?.baseHue ?? 0}
+                currentSettings={tintOverrides[tintModalGroupId]}
+                colorMembers={colorGroups.find(g => g.id === tintModalGroupId)?.members ?? []}
+                onChange={(settings) => {
+                  if (settings) {
+                    setTintOverrides(prev => ({ ...prev, [tintModalGroupId]: settings }));
+                  } else {
+                    setTintOverrides(prev => {
+                      const next = { ...prev };
+                      delete next[tintModalGroupId];
+                      return next;
+                    });
+                  }
+                }}
+                onClose={() => setTintModalGroupId(null)}
+              />
+            );
+          })()}
         </div>
       )}
       <img ref={sourceImageRef} src={image || ''} className="hidden" alt="Source" />

@@ -36,6 +36,13 @@ export interface ColorGroup {
   targetHue?: number;         // For tint mode: the target hue to shift to (0-360)
 }
 
+export interface Supergroup {
+  id: string;
+  label: string;
+  memberGroupIds: string[]; // IDs of the ColorGroups belonging to this supergroup
+  tint?: TintSettings; // The master tint for this supergroup (optional)
+}
+
 export interface PixelArtConfig {
   enabled: boolean;
   pixelWidth: number;
