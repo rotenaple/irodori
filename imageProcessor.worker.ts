@@ -995,40 +995,45 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                 // Compute sharp (native, nearest-neighbor) and smooth (interpolated) alpha, then
                 // blend/shape the result based on the alphaSmoothness parameter (with optional sigmoid)
-                const nativeAlphaIdx = ly * nativeWidth + lx;
-                const sharpAlpha = nativeAlpha[nativeAlphaIdx];
-                const smoothAlpha = highResPixelData[outIdx + 3];
+                let finalAlpha = 255;
 
-                let finalAlpha: number;
-                const alphaIntensity = (alphaSmoothness || 0) / 100;
+                if (preserveTransparency && nativeAlpha) {
+                    // Compute sharp (native, nearest-neighbor) and smooth (interpolated) alpha, then
+                    // blend/shape the result based on the alphaSmoothness parameter (with optional sigmoid)
+                    const nativeAlphaIdx = ly * nativeWidth + lx;
+                    const sharpAlpha = nativeAlpha[nativeAlphaIdx];
+                    const smoothAlpha = highResPixelData[outIdx + 3];
 
-                if (alphaIntensity === 0) {
-                    // Binary snap: pure nearest-neighbor
-                    finalAlpha = sharpAlpha;
-                } else {
-                    // Apply sigmoid to interpolated alpha value
-                    // Normalize to 0-1 range
-                    const alphaNorm = smoothAlpha / 255;
+                    const alphaIntensity = (alphaSmoothness || 0) / 100;
 
-                    // Sigmoid sharpness: k increases with lower alphaSmoothness
-                    // At 10%: k=20 (very sharp, nearly binary)
-                    // At 50%: k=8 (moderate smoothing)
-                    // At 100%: k=2 (gentle smoothing)
-                    const k = 20 * (1 - alphaIntensity) + 2 * alphaIntensity;
+                    if (alphaIntensity === 0) {
+                        // Binary snap: pure nearest-neighbor
+                        finalAlpha = sharpAlpha;
+                    } else {
+                        // Apply sigmoid to interpolated alpha value
+                        // Normalize to 0-1 range
+                        const alphaNorm = smoothAlpha / 255;
 
-                    // Apply sigmoid centered at 0.5
-                    const s0 = 1 / (1 + Math.exp(-k * (-0.5)));
-                    const s1 = 1 / (1 + Math.exp(-k * (0.5)));
-                    const rawS = 1 / (1 + Math.exp(-k * (alphaNorm - 0.5)));
-                    const sigmoidAlpha = (rawS - s0) / (s1 - s0);
+                        // Sigmoid sharpness: k increases with lower alphaSmoothness
+                        // At 10%: k=20 (very sharp, nearly binary)
+                        // At 50%: k=8 (moderate smoothing)
+                        // At 100%: k=2 (gentle smoothing)
+                        const k = 20 * (1 - alphaIntensity) + 2 * alphaIntensity;
 
-                    finalAlpha = Math.round(sigmoidAlpha * 255);
+                        // Apply sigmoid centered at 0.5
+                        const s0 = 1 / (1 + Math.exp(-k * (-0.5)));
+                        const s1 = 1 / (1 + Math.exp(-k * (0.5)));
+                        const rawS = 1 / (1 + Math.exp(-k * (alphaNorm - 0.5)));
+                        const sigmoidAlpha = (rawS - s0) / (s1 - s0);
+
+                        finalAlpha = Math.round(sigmoidAlpha * 255);
+                    }
                 }
 
                 outputData[outIdx] = finalR;
                 outputData[outIdx + 1] = finalG;
                 outputData[outIdx + 2] = finalB;
-                outputData[outIdx + 3] = preserveTransparency ? finalAlpha : 255;
+                outputData[outIdx + 3] = finalAlpha;
             }
         }
 
