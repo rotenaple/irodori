@@ -149,10 +149,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const colorCounts = new Map<string, { count: number; r: number; g: number; b: number; a: number }>();
                     
                     // Sample all pixels in this block with offset
-                    const startX = px * pixelWidth + offsetX;
-                    const startY = py * pixelHeight + offsetY;
-                    const endX = Math.min(startX + pixelWidth, nativeWidth);
-                    const endY = Math.min(startY + pixelHeight, nativeHeight);
+                    // Clamp coordinates to stay within image bounds to avoid sampling undefined pixels
+                    const startX = Math.max(0, Math.min(px * pixelWidth + offsetX, nativeWidth - 1));
+                    const startY = Math.max(0, Math.min(py * pixelHeight + offsetY, nativeHeight - 1));
+                    const endX = Math.max(0, Math.min(startX + pixelWidth, nativeWidth));
+                    const endY = Math.max(0, Math.min(startY + pixelHeight, nativeHeight));
                     
                     for (let sy = startY; sy < endY; sy++) {
                         for (let sx = startX; sx < endX; sx++) {
