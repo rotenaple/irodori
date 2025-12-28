@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { TintSettings, ColorInstance } from '../types';
 import { hslToRgb, rgbToHex, applyTintToHex } from '../utils/colorUtils';
 
@@ -14,45 +14,13 @@ interface TintModalProps {
 export const TintModal: React.FC<TintModalProps> = ({
   groupId, baseHue, currentSettings, colorMembers, onChange, onClose
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
   // Initialize with current settings or defaults
-  const [hue, setHue] = useState(currentSettings?.hue ?? baseHue);
+  const [hue, setHue] = useState(currentSettings?.hue ?? Math.round(baseHue));
   const [saturation, setSaturation] = useState(currentSettings?.saturation ?? 0);
   const [lightness, setLightness] = useState(currentSettings?.lightness ?? 0);
   const [hueForce, setHueForce] = useState(currentSettings?.hueForce ?? 100);
   const [saturationForce, setSaturationForce] = useState(currentSettings?.saturationForce ?? 100);
   const [lightnessForce, setLightnessForce] = useState(currentSettings?.lightnessForce ?? 100);
-
-  // Draw hue spectrum canvas (1D rainbow)
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const { width, height } = canvas;
-    for (let x = 0; x < width; x++) {
-      const h = (x / width) * 360;
-      ctx.fillStyle = `hsl(${h}, 100%, 50%)`;
-      ctx.fillRect(x, 0, 1, height);
-    }
-
-    // Draw tick marks at current hue
-    const x = Math.round((hue / 360) * width);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.fillRect(x - 1, 0, 2, height);
-  }, [hue]);
-
-  const handleCanvasInteract = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
-    const x = Math.max(0, Math.min(canvas.width - 1, ((clientX - rect.left) / rect.width) * canvas.width));
-    const newHue = Math.min(359, Math.round((x / canvas.width) * 360));
-    setHue(newHue);
-  };
 
   // Preview the tinted color
   const previewHsl = {
@@ -138,32 +106,39 @@ export const TintModal: React.FC<TintModalProps> = ({
 
           {/* Unified Hue Picker - 1D rainbow */}
           <div className="space-y-2">
+
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Hue</div>
-            <canvas
-              ref={canvasRef} width={400} height={40}
-              className="w-full rounded-xl border border-slate-200 cursor-crosshair shadow-sm block"
-              onMouseDown={handleCanvasInteract}
-              onMouseMove={(e) => e.buttons === 1 && handleCanvasInteract(e)}
-              onTouchMove={handleCanvasInteract}
-            />
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
+                <div className="flex-1 h-5 flex items-center min-w-0">
+                  <input
+                    type="range" min="0" max="360" step="1" value={hue}
+                    onChange={(e) => setHue(Math.max(0, Math.min(360, parseInt(e.target.value) || 0)))}
+                    className="custom-slider"
+                    style={{ background: 'linear-gradient(to right, hsl(0, 100%, 50%), hsl(60, 100%, 50%), hsl(120, 100%, 50%), hsl(180, 100%, 50%), hsl(240, 100%, 50%), hsl(300, 100%, 50%), hsl(360, 100%, 50%))' }}
+                  />
+                </div>
                 <input
                   type="number" min="0" max="360" value={hue}
                   onChange={(e) => setHue(Math.max(0, Math.min(360, parseInt(e.target.value) || 0)))}
-                  className="flex-1 bg-white border border-slate-200 rounded-md py-1 px-2 text-center font-mono text-xs text-slate-600 h-7 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
-                <span className="text-[9px] text-slate-400">°</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Strength</span>
+                <div className="flex-1 h-5 flex items-center min-w-0">
+                  <input
+                    type="range" min="0" max="100" step="1" value={hueForce}
+                    onChange={(e) => setHueForce(parseInt(e.target.value))}
+                    className="custom-slider"
+                  />
+                </div>
                 <input
-                  type="range" min="0" max="100" step="1" value={hueForce}
-                  onChange={(e) => setHueForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  type="number" min="0" max="100" value={hueForce}
+                  onChange={(e) => setHueForce(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
-                <span className="text-[9px] font-mono text-slate-500 w-8 text-right">{hueForce}%</span>
               </div>
             </div>
           </div>
@@ -171,28 +146,36 @@ export const TintModal: React.FC<TintModalProps> = ({
           {/* Saturation */}
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Saturation</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
-                <input
-                  type="range" min="-100" max="100" step="1" value={saturation}
-                  onChange={(e) => setSaturation(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
-                />
+                <div className="flex-1 h-5 flex items-center min-w-0">
+                  <input
+                    type="range" min="-100" max="100" step="1" value={saturation}
+                    onChange={(e) => setSaturation(parseInt(e.target.value))}
+                    className="custom-slider"
+                  />
+                </div>
                 <input
                   type="number" min="-100" max="100" value={saturation}
                   onChange={(e) => setSaturation(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
-                  className="w-12 bg-white border border-slate-200 rounded-md py-0.5 text-center font-mono text-[10px] text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Strength</span>
+                <div className="flex-1 h-5 flex items-center min-w-0">
+                  <input
+                    type="range" min="0" max="100" step="1" value={saturationForce}
+                    onChange={(e) => setSaturationForce(parseInt(e.target.value))}
+                    className="custom-slider"
+                  />
+                </div>
                 <input
-                  type="range" min="0" max="100" step="1" value={saturationForce}
-                  onChange={(e) => setSaturationForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  type="number" min="0" max="100" value={saturationForce}
+                  onChange={(e) => setSaturationForce(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
-                <span className="text-[9px] font-mono text-slate-500 w-8 text-right">{saturationForce}%</span>
               </div>
             </div>
           </div>
@@ -200,28 +183,36 @@ export const TintModal: React.FC<TintModalProps> = ({
           {/* Lightness */}
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Lightness</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
-                <input
-                  type="range" min="-100" max="100" step="1" value={lightness}
-                  onChange={(e) => setLightness(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
-                />
+                <div className="flex-1 h-5 flex items-center min-w-0">
+                  <input
+                    type="range" min="-100" max="100" step="1" value={lightness}
+                    onChange={(e) => setLightness(parseInt(e.target.value))}
+                    className="custom-slider"
+                  />
+                </div>
                 <input
                   type="number" min="-100" max="100" value={lightness}
                   onChange={(e) => setLightness(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
-                  className="w-12 bg-white border border-slate-200 rounded-md py-0.5 text-center font-mono text-[10px] text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Strength</span>
+                <div className="flex-1 h-5 flex items-center min-w-0">
+                  <input
+                    type="range" min="0" max="100" step="1" value={lightnessForce}
+                    onChange={(e) => setLightnessForce(parseInt(e.target.value))}
+                    className="custom-slider"
+                  />
+                </div>
                 <input
-                  type="range" min="0" max="100" step="1" value={lightnessForce}
-                  onChange={(e) => setLightnessForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  type="number" min="0" max="100" value={lightnessForce}
+                  onChange={(e) => setLightnessForce(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
-                <span className="text-[9px] font-mono text-slate-500 w-8 text-right">{lightnessForce}%</span>
               </div>
             </div>
           </div>
@@ -245,6 +236,6 @@ export const TintModal: React.FC<TintModalProps> = ({
           <i className="fa-solid fa-check"></i> Apply Tint
         </button>
       </div>
-    </div>
+    </div >
   );
 };

@@ -177,7 +177,16 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
                           <div key={c} className="flex items-center gap-2">
                             <span className="w-3 text-[10px] font-bold uppercase text-slate-400">{c}</span>
                             <div className="flex-1 h-5 flex items-center">
-                              <input type="range" min="0" max="255" value={rgbValues[c]} onChange={(e) => updateRGB(c, e.target.value)} className="custom-slider" />
+                              <input
+                                type="range" min="0" max="255" value={rgbValues[c]} onChange={(e) => updateRGB(c, e.target.value)} className="custom-slider"
+                                style={{
+                                  background: c === 'r'
+                                    ? `linear-gradient(90deg, rgb(0, ${rgbValues.g}, ${rgbValues.b}), rgb(255, ${rgbValues.g}, ${rgbValues.b}))`
+                                    : c === 'g'
+                                      ? `linear-gradient(90deg, rgb(${rgbValues.r}, 0, ${rgbValues.b}), rgb(${rgbValues.r}, 255, ${rgbValues.b}))`
+                                      : `linear-gradient(90deg, rgb(${rgbValues.r}, ${rgbValues.g}, 0), rgb(${rgbValues.r}, ${rgbValues.g}, 255))`
+                                }}
+                              />
                             </div>
                             <input
                               type="number"
@@ -193,7 +202,10 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="w-3 text-[10px] font-bold uppercase text-slate-400">H</span>
                           <div className="flex-1 h-5 flex items-center">
-                            <input type="range" min="0" max="359" step="1" value={hslValues.h} onChange={(e) => updateHSL('h', e.target.value)} className="custom-slider" />
+                            <input
+                              type="range" min="0" max="359" step="1" value={hslValues.h} onChange={(e) => updateHSL('h', e.target.value)} className="custom-slider"
+                              style={{ background: `linear-gradient(to right, hsl(0, ${hslValues.s}%, ${hslValues.l}%), hsl(60, ${hslValues.s}%, ${hslValues.l}%), hsl(120, ${hslValues.s}%, ${hslValues.l}%), hsl(180, ${hslValues.s}%, ${hslValues.l}%), hsl(240, ${hslValues.s}%, ${hslValues.l}%), hsl(300, ${hslValues.s}%, ${hslValues.l}%), hsl(360, ${hslValues.s}%, ${hslValues.l}%))` }}
+                            />
                           </div>
                           <input
                             type="number"
@@ -205,7 +217,10 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="w-3 text-[10px] font-bold uppercase text-slate-400">S</span>
                           <div className="flex-1 h-5 flex items-center">
-                            <input type="range" min="0" max="100" step="1" value={hslValues.s} onChange={(e) => updateHSL('s', e.target.value)} className="custom-slider" />
+                            <input
+                              type="range" min="0" max="100" step="1" value={hslValues.s} onChange={(e) => updateHSL('s', e.target.value)} className="custom-slider"
+                              style={{ background: `linear-gradient(to right, hsl(${hslValues.h}, 0%, ${hslValues.l}%), hsl(${hslValues.h}, 100%, ${hslValues.l}%))` }}
+                            />
                           </div>
                           <input
                             type="number"
@@ -217,7 +232,10 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="w-3 text-[10px] font-bold uppercase text-slate-400">L</span>
                           <div className="flex-1 h-5 flex items-center">
-                            <input type="range" min="0" max="100" step="1" value={hslValues.l} onChange={(e) => updateHSL('l', e.target.value)} className="custom-slider" />
+                            <input
+                              type="range" min="0" max="100" step="1" value={hslValues.l} onChange={(e) => updateHSL('l', e.target.value)} className="custom-slider"
+                              style={{ background: `linear-gradient(to right, hsl(${hslValues.h}, ${hslValues.s}%, 0%), hsl(${hslValues.h}, ${hslValues.s}%, 50%), hsl(${hslValues.h}, ${hslValues.s}%, 100%))` }}
+                            />
                           </div>
                           <input
                             type="number"
