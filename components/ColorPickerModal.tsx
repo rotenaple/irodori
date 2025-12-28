@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { rgbToHex, hexToRgb, HTML_COLORS } from '../utils/colorUtils';
+import { rgbToHex, hexToRgb, rgbToHsl, hslToRgb, hslToHex, HTML_COLORS } from '../utils/colorUtils';
 import { PALETTES } from '../constants/palettes';
 import { ColorInstance } from '../types';
 
@@ -18,6 +18,16 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [paletteTab, setPaletteTab] = useState<'classic' | 'bright'>('classic');
+  const [colorMode, setColorMode] = useState<'rgb' | 'hsl'>('rgb');
+  const [rgbValues, setRgbValues] = useState({ r: 0, g: 0, b: 0 });
+  const [hslValues, setHslValues] = useState({ h: 0, s: 0, l: 0 });
+
+  // Initialize state from currentHex
+  useEffect(() => {
+    const rgb = hexToRgb(currentHex) || { r: 0, g: 0, b: 0 };
+    setRgbValues(rgb);
+    setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
+  }, [currentHex]);
 
   useEffect(() => {
     if (mode !== 'spectrum') return;
@@ -51,16 +61,41 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     const pixel = ctx.getImageData(x, y, 1, 1).data;
-    onChange(rgbToHex(pixel[0], pixel[1], pixel[2]));
+    const rgb = { r: pixel[0], g: pixel[1], b: pixel[2] };
+    setRgbValues(rgb);
+    setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
   };
 
-  const rgb = hexToRgb(currentHex) || { r: 0, g: 0, b: 0 };
+  // Compute current hex for preview
+  const computedHex = useMemo(() => {
+    if (colorMode === 'rgb') {
+      return rgbToHex(rgbValues.r, rgbValues.g, rgbValues.b);
+    } else {
+      return hslToHex(hslValues.h, hslValues.s, hslValues.l);
+    }
+  }, [colorMode, rgbValues, hslValues]);
 
   const updateRGB = (channel: 'r' | 'g' | 'b', value: string) => {
     let num = parseInt(value);
     if (isNaN(num)) num = 0;
-    const next = { ...rgb, [channel]: Math.max(0, Math.min(255, num)) };
-    onChange(rgbToHex(next.r, next.g, next.b));
+    const next = { ...rgbValues, [channel]: Math.max(0, Math.min(255, num)) };
+    setRgbValues(next);
+    setHslValues(rgbToHsl(next.r, next.g, next.b));
+  };
+
+  const updateHSL = (channel: 'h' | 's' | 'l', value: string) => {
+    let num = parseFloat(value);
+    if (isNaN(num)) num = 0;
+    let next: { h: number; s: number; l: number };
+    if (channel === 'h') {
+      next = { ...hslValues, h: Math.max(0, Math.min(359, num)) };
+    } else if (channel === 's') {
+      next = { ...hslValues, s: Math.max(0, Math.min(100, num)) };
+    } else {
+      next = { ...hslValues, l: Math.max(0, Math.min(100, num)) };
+    }
+    setHslValues(next);
+    // Don't update RGB to prevent rounding issues - RGB will be computed when Apply is clicked
   };
 
   const processedSuggestions = useMemo(() => {
@@ -113,32 +148,86 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
 
                 <div className="lg:w-1/2 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg border border-slate-200 shadow-sm shrink-0" style={{ backgroundColor: currentHex }} />
+                    <div className="w-8 h-8 rounded-lg border border-slate-200 shadow-sm shrink-0" style={{ backgroundColor: computedHex }} />
                     <div className="flex-1 flex items-center gap-3">
                       <span className="text-[10px] font-bold uppercase text-slate-400 shrink-0">Hex</span>
                       <input
-                        type="text" value={currentHex.toUpperCase()}
-                        onChange={(e) => onChange(e.target.value)}
+                        type="text" value={computedHex.toUpperCase()}
+                        onChange={(e) => {
+                          const hex = e.target.value;
+                          const rgb = hexToRgb(hex);
+                          if (rgb) {
+                            setRgbValues(rgb);
+                            setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
+                          }
+                        }}
                         className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-mono text-sm text-slate-700 outline-none focus:border-[#33569a] transition-colors"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-1.5 pt-0.5">
-                    {(['r', 'g', 'b'] as const).map(c => (
-                      <div key={c} className="flex items-center gap-2">
-                        <span className="w-3 text-[10px] font-bold uppercase text-slate-400">{c}</span>
-                        <div className="flex-1 h-5 flex items-center">
-                          <input type="range" min="0" max="255" value={rgb[c]} onChange={(e) => updateRGB(c, e.target.value)} className="custom-slider" />
+                    <div className="flex gap-1 bg-slate-100 p-1 rounded-lg mb-2">
+                      <button onClick={() => setColorMode('rgb')} className={`px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all flex-1 text-center ${colorMode === 'rgb' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>RGB</button>
+                      <button onClick={() => setColorMode('hsl')} className={`px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all flex-1 text-center ${colorMode === 'hsl' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>HSL</button>
+                    </div>
+                    {colorMode === 'rgb' ? (
+                      <>
+                        {(['r', 'g', 'b'] as const).map(c => (
+                          <div key={c} className="flex items-center gap-2">
+                            <span className="w-3 text-[10px] font-bold uppercase text-slate-400">{c}</span>
+                            <div className="flex-1 h-5 flex items-center">
+                              <input type="range" min="0" max="255" value={rgbValues[c]} onChange={(e) => updateRGB(c, e.target.value)} className="custom-slider" />
+                            </div>
+                            <input
+                              type="number"
+                              value={rgbValues[c]}
+                              onChange={(e) => updateRGB(c, e.target.value)}
+                              className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 text-[10px] font-bold uppercase text-slate-400">H</span>
+                          <div className="flex-1 h-5 flex items-center">
+                            <input type="range" min="0" max="359" step="1" value={hslValues.h} onChange={(e) => updateHSL('h', e.target.value)} className="custom-slider" />
+                          </div>
+                          <input
+                            type="number"
+                            value={Math.round(hslValues.h)}
+                            onChange={(e) => updateHSL('h', e.target.value)}
+                            className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
                         </div>
-                        <input
-                          type="number"
-                          value={rgb[c]}
-                          onChange={(e) => updateRGB(c, e.target.value)}
-                          className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                      </div>
-                    ))}
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 text-[10px] font-bold uppercase text-slate-400">S</span>
+                          <div className="flex-1 h-5 flex items-center">
+                            <input type="range" min="0" max="100" step="1" value={hslValues.s} onChange={(e) => updateHSL('s', e.target.value)} className="custom-slider" />
+                          </div>
+                          <input
+                            type="number"
+                            value={Math.round(hslValues.s)}
+                            onChange={(e) => updateHSL('s', e.target.value)}
+                            className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 text-[10px] font-bold uppercase text-slate-400">L</span>
+                          <div className="flex-1 h-5 flex items-center">
+                            <input type="range" min="0" max="100" step="1" value={hslValues.l} onChange={(e) => updateHSL('l', e.target.value)} className="custom-slider" />
+                          </div>
+                          <input
+                            type="number"
+                            value={Math.round(hslValues.l)}
+                            onChange={(e) => updateHSL('l', e.target.value)}
+                            className="w-10 bg-white border border-slate-200 rounded-md py-0 text-center font-mono text-xs text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -152,7 +241,11 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
             <div className="flex-1 overflow-y-auto px-5 pb-5 scrollbar-thin">
               <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 items-start mt-1">
                 {PALETTES[paletteTab].map(p => (
-                  <button key={p.hex} onClick={() => onChange(p.hex)} className={`group p-1.5 rounded-lg border transition-all h-full flex flex-col ${currentHex.toLowerCase() === p.hex.toLowerCase() ? 'border-slate-400 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={p.name}>
+                  <button key={p.hex} onClick={() => {
+                    const rgb = hexToRgb(p.hex)!;
+                    setRgbValues(rgb);
+                    setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
+                  }} className={`group p-1.5 rounded-lg border transition-all h-full flex flex-col ${computedHex.toLowerCase() === p.hex.toLowerCase() ? 'border-slate-400 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={p.name}>
                     <div className="w-full aspect-square rounded-md shadow-sm border border-black/5 mb-1.5 shrink-0" style={{ backgroundColor: p.hex }} />
                     <div className="text-[10px] font-bold text-slate-500 text-center leading-3 uppercase w-full break-words">{p.name}</div>
                   </button>
@@ -166,7 +259,11 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
               <p className="text-xs text-slate-500 italic">Select a color from the image palette.</p>
               <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-8 gap-3">
                 {processedSuggestions.map((s, idx) => (
-                  <button key={idx} onClick={() => onChange(s.hex)} className={`group p-1.5 rounded-xl border transition-all ${currentHex.toLowerCase() === s.hex.toLowerCase() ? 'border-[#333]/20 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={s.name || s.hex}>
+                  <button key={idx} onClick={() => {
+                    const rgb = hexToRgb(s.hex)!;
+                    setRgbValues(rgb);
+                    setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
+                  }} className={`group p-1.5 rounded-xl border transition-all ${computedHex.toLowerCase() === s.hex.toLowerCase() ? 'border-[#333]/20 bg-slate-50 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`} title={s.name || s.hex}>
                     <div className="w-full aspect-square rounded-lg mb-1 shadow-sm border border-black/5 relative group" style={{ backgroundColor: s.hex }}>
                       {s.percentage !== undefined && (
                         <div className="absolute -top-1 -right-1 bg-white/90 backdrop-blur-sm border border-slate-200 px-1 rounded text-[9px] font-bold text-slate-600 shadow-sm opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
@@ -206,7 +303,10 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
             Reset
           </button>
         )}
-        <button onClick={onClose} className="flex-1 bg-[#333] text-white rounded-xl h-11 font-bold uppercase tracking-widest text-[11px] shadow-lg active:scale-[0.98] transition-all hover:bg-black flex items-center justify-center gap-2">
+        <button onClick={() => {
+          onChange(computedHex);
+          onClose();
+        }} className="flex-1 bg-[#333] text-white rounded-xl h-11 font-bold uppercase tracking-widest text-[11px] shadow-lg active:scale-[0.98] transition-all hover:bg-black flex items-center justify-center gap-2">
           <i className="fa-solid fa-check"></i> Apply Color
         </button>
       </div>

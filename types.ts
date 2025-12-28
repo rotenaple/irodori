@@ -5,6 +5,12 @@ export interface ColorRGB {
   b: number;
 }
 
+export interface ColorHSL {
+  h: number;
+  s: number;
+  l: number;
+}
+
 export interface PaletteColor extends ColorRGB {
   hex: string;
   id: string;
