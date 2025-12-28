@@ -269,6 +269,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             if (effectiveEdgeProtection > 85) { radius = 5; iterations = 5; }
 
             const tempIdxMap = new Int16Array(lowResIdxMap.length);
+            const localCounts = new Uint32Array(paletteSize);
 
             for (let iter = 0; iter < iterations; iter++) {
                 for (let y = 0; y < nativeHeight; y++) {
@@ -288,7 +289,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         const srcB = nativePixelData[sIdx + 2];
 
                         // Count local palette indices (use Uint32Array to prevent overflow)
-                        const localCounts = new Uint32Array(paletteSize);
+                        localCounts.fill(0);
                         for (let ny = yStart; ny <= yEnd; ny++) {
                             const nyOffset = ny * nativeWidth;
                             for (let nx = xStart; nx <= xEnd; nx++) {
