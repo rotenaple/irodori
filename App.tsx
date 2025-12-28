@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { PaletteColor, ProcessingState, ColorGroup, ColorInstance, PixelArtConfig } from './types';
+import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig } from './types';
 import {
   rgbToHex,
   hexToRgb,
