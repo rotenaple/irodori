@@ -401,21 +401,46 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 min2={1}
                 max2={32}
                 locked={pixelArtConfig.lockAspect}
-                onValue1Change={(val) => setPixelArtConfig(prev => ({
-                  ...prev,
-                  pixelWidth: val,
-                  pixelHeight: prev.lockAspect ? val : prev.pixelHeight
-                }))}
-                onValue2Change={(val) => setPixelArtConfig(prev => ({
-                  ...prev,
-                  pixelHeight: val,
-                  pixelWidth: prev.lockAspect ? val : prev.pixelWidth
-                }))}
-                onLockToggle={() => setPixelArtConfig(prev => ({
-                  ...prev,
-                  lockAspect: !prev.lockAspect,
-                  pixelHeight: !prev.lockAspect ? prev.pixelWidth : prev.pixelHeight
-                }))}
+                onValue1Change={(val) => setPixelArtConfig(prev => {
+                  const newPixelWidth = val;
+                  const newPixelHeight = prev.lockAspect ? val : prev.pixelHeight;
+                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                  return {
+                    ...prev,
+                    pixelWidth: newPixelWidth,
+                    pixelHeight: newPixelHeight,
+                    offsetX: Math.min(prev.offsetX, maxOffsetX),
+                    offsetY: Math.min(prev.offsetY, maxOffsetY),
+                  };
+                })}
+                onValue2Change={(val) => setPixelArtConfig(prev => {
+                  const newPixelHeight = val;
+                  const newPixelWidth = prev.lockAspect ? val : prev.pixelWidth;
+                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                  return {
+                    ...prev,
+                    pixelHeight: newPixelHeight,
+                    pixelWidth: newPixelWidth,
+                    offsetX: Math.min(prev.offsetX, maxOffsetX),
+                    offsetY: Math.min(prev.offsetY, maxOffsetY),
+                  };
+                })}
+                onLockToggle={() => setPixelArtConfig(prev => {
+                  const newLockAspect = !prev.lockAspect;
+                  const newPixelWidth = prev.pixelWidth;
+                  const newPixelHeight = newLockAspect ? prev.pixelWidth : prev.pixelHeight;
+                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                  return {
+                    ...prev,
+                    lockAspect: newLockAspect,
+                    pixelHeight: newPixelHeight,
+                    offsetX: Math.min(prev.offsetX, maxOffsetX),
+                    offsetY: Math.min(prev.offsetY, maxOffsetY),
+                  };
+                })}
                 infoKey="pixelsize"
                 isInfoOpen={activeInfos.has('pixelsize')}
                 onInfoToggle={() => toggleInfo('pixelsize')}
