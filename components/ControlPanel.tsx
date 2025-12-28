@@ -278,7 +278,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           {isSvg ? (
             <><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Scaling is disabled; SVGs maintain infinite resolution.</>
           ) : pixelArtConfig.enabled ? (
-            <><div className="flex items-center gap-2 text-blue-600 font-bold mb-1"><i className="fa-solid fa-cube"></i><span>Pixel Art Mode Active</span></div>Scale value is used as maximum dimension. The largest integer scale that fits will be applied.</> ) : (
+            <><div className="flex items-center gap-2 text-blue-600 font-bold mb-1"><i className="fa-solid fa-cube"></i><span>Pixel Art Mode Active</span></div> Scale value is used as maximum dimension. The largest integer scale that fits will be applied.</>  ) : (
             "Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb."
           )}
         </ExpandableInfoBox>
