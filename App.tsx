@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { PaletteColor, ProcessingState, ColorGroup, ColorInstance } from './types';
+import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig } from './types';
 import {
   rgbToHex,
   hexToRgb,
@@ -39,6 +39,19 @@ const App: React.FC = () => {
   const [disableScaling, setDisableScaling] = useState<boolean>(false);
   const [alphaSmoothness, setAlphaSmoothness] = useState<number>(0);
   const [hasTransparency, setHasTransparency] = useState<boolean>(false);
+  const [preserveTransparency, setPreserveTransparency] = useState<boolean>(true);
+  
+  // Pixel Art Mode State
+  const [pixelArtConfig, setPixelArtConfig] = useState<PixelArtConfig>({
+    enabled: false,
+    pixelWidth: 8,
+    pixelHeight: 8,
+    lockAspect: true,
+    showGrid: true,
+    offsetX: 0,
+    offsetY: 0,
+    lockOffset: false
+  });
 
   const [processingState, setProcessingState] = useState<'idle' | 'processing' | 'completed'>('idle');
   const [processedImage, setProcessedImage] = useState<string | null>(null);
@@ -177,6 +190,16 @@ const App: React.FC = () => {
           });
           setSelectedInGroup(initialSelections);
           setEnabledGroups(initialEnabled);
+          
+          // Calculate default pixel size for pixel art mode
+          // Good heuristic: aim for 40-80 pixels on the shorter dimension
+          const shorterDim = Math.min(drawWidth, drawHeight);
+          const estimatedPixelSize = Math.max(1, Math.round(shorterDim / 60));
+          setPixelArtConfig(prev => ({
+            ...prev,
+            pixelWidth: estimatedPixelSize,
+            pixelHeight: estimatedPixelSize
+          }));
         }
 
         if (canvasRef.current) {
@@ -356,7 +379,9 @@ const App: React.FC = () => {
           selectedInGroup,
           smoothingLevels,
           vertexInertia,
-          alphaSmoothness
+          alphaSmoothness,
+          preserveTransparency,
+          pixelArtConfig
         }
       }, [imageBitmap]);
     } catch (err) {
@@ -421,6 +446,8 @@ const App: React.FC = () => {
               colorGroupingDistance={colorGroupingDistance} setColorGroupingDistance={setColorGroupingDistance}
               alphaSmoothness={alphaSmoothness} setAlphaSmoothness={setAlphaSmoothness}
               hasTransparency={hasTransparency}
+              preserveTransparency={preserveTransparency}
+              setPreserveTransparency={setPreserveTransparency}
               image={image} onImageUpload={handleImageUpload}
               colorGroups={colorGroups} manualLayerIds={manualLayerIds}
               selectedInGroup={selectedInGroup} enabledGroups={enabledGroups} setEnabledGroups={setEnabledGroups}
@@ -447,6 +474,8 @@ const App: React.FC = () => {
               isSvg={isSvg}
               mobileViewTarget={mobileViewTarget}
               onMobileViewToggle={handleMobileView}
+              pixelArtConfig={pixelArtConfig}
+              setPixelArtConfig={setPixelArtConfig}
             />
           </div>
           <div className="px-4 md:px-6 py-4 z-20">
@@ -480,6 +509,7 @@ const App: React.FC = () => {
               isSvg={isSvg}
               mobileViewTarget={mobileViewTarget}
               onClearMobileView={() => setMobileViewTarget(null)}
+              pixelArtConfig={pixelArtConfig}
             />
           </div>
         </section>

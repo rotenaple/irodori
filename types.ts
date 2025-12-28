@@ -32,6 +32,17 @@ export interface ColorGroup {
   representativeHex?: string; // Cache the chosen representative or override
 }
 
+export interface PixelArtConfig {
+  enabled: boolean;
+  pixelWidth: number;
+  pixelHeight: number;
+  lockAspect: boolean;
+  showGrid: boolean;
+  offsetX: number;
+  offsetY: number;
+  lockOffset: boolean;
+}
+
 export type ProcessingState = 'idle' | 'processing' | 'completed';
 
 export type WorkerMessage = {
@@ -51,6 +62,8 @@ export type WorkerMessage = {
     smoothingLevels: number;
     vertexInertia: number;
     alphaSmoothness: number;
+    preserveTransparency: boolean;
+    pixelArtConfig?: PixelArtConfig;
   };
   svgContent?: string;
 };

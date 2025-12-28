@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { formatSize } from '../utils/formatUtils';
 import { rgbToHex, hexToRgb } from '../utils/colorUtils';
-import { ColorGroup } from '../types';
+import { ColorGroup, PixelArtConfig } from '../types';
 
 interface ImageWorkspaceProps {
   image: string | null;
@@ -18,6 +18,7 @@ interface ImageWorkspaceProps {
   isSvg: boolean;
   mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
   onClearMobileView: () => void;
+  pixelArtConfig: PixelArtConfig;
 }
 
 const MAGNIFIER_SIZE = 245;
@@ -30,7 +31,8 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
   hoveredColor, hoveredGroupId, colorGroups,
   isSvg,
   mobileViewTarget,
-  onClearMobileView
+  onClearMobileView,
+  pixelArtConfig
 }) => {
   const [magnifierPos, setMagnifierPos] = useState<{
     screenX: number,
@@ -405,6 +407,29 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
                   mobileViewTarget={mobileViewTarget}
                 />
               )}
+
+              {/* Layer 3: Pixel Art Grid Overlay */}
+              {pixelArtConfig.enabled
+                && pixelArtConfig.showGrid
+                && activeTab === 'original'
+                && activeImageDims
+                && activeImageDims.width > 0
+                && activeImageDims.height > 0
+                && layoutDims?.width
+                && layoutDims?.height
+                && (
+                  <div 
+                    className="absolute inset-0 pointer-events-none z-10"
+                    style={{
+                      backgroundImage: `
+                        linear-gradient(to right, rgba(0,0,0,0.3) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(0,0,0,0.3) 1px, transparent 1px)
+                      `,
+                      backgroundSize: `${(layoutDims?.width || 0) * pixelArtConfig.pixelWidth / activeImageDims.width}px ${(layoutDims?.height || 0) * pixelArtConfig.pixelHeight / activeImageDims.height}px`,
+                      backgroundPosition: `${(layoutDims?.width || 0) * pixelArtConfig.offsetX / activeImageDims.width}px ${(layoutDims?.height || 0) * pixelArtConfig.offsetY / activeImageDims.height}px`
+                    }}
+                  />
+                )}
 
               {/* Floating Dismiss Button */}
               {mobileViewTarget && (

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ColorGroup } from '../types';
+import { ColorGroup, PixelArtConfig } from '../types';
+import { DualNumberInput } from './DualNumberInput';
 
 // --- Reusable UI Components ---
 
@@ -123,6 +124,8 @@ interface ControlPanelProps {
   alphaSmoothness: number;
   setAlphaSmoothness: (v: number) => void;
   hasTransparency: boolean;
+  preserveTransparency: boolean;
+  setPreserveTransparency: (v: boolean) => void;
   image: string | null;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   colorGroups: ColorGroup[];
@@ -153,18 +156,22 @@ interface ControlPanelProps {
   isSvg: boolean;
   mobileViewTarget: { id: string, type: 'group' | 'color' } | null;
   onMobileViewToggle: (id: string, type: 'group' | 'color') => void;
+  pixelArtConfig: PixelArtConfig;
+  setPixelArtConfig: (v: PixelArtConfig | ((prev: PixelArtConfig) => PixelArtConfig)) => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   upscaleFactor, setUpscaleFactor, denoiseRadius, setDenoiseRadius, smoothingLevels, setSmoothingLevels,
   vertexInertia, setVertexInertia, edgeProtection, setEdgeProtection, colorGroupingDistance, setColorGroupingDistance,
-  alphaSmoothness, setAlphaSmoothness, hasTransparency,
+  alphaSmoothness, setAlphaSmoothness, hasTransparency, preserveTransparency, setPreserveTransparency,
   image, onImageUpload,
   colorGroups, manualLayerIds, selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget, onMoveColor, onMergeGroups, onRecomputeGroups,
   setHoveredColor, hoveredGroupId, setHoveredGroupId, draggedItem, setDraggedItem, totalSamples,
+  paletteLength,
   disableScaling, setDisableScaling, disablePostProcessing, setDisablePostProcessing,
-  disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle
+  disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle,
+  pixelArtConfig, setPixelArtConfig
 }) => {
   const [activeInfos, setActiveInfos] = useState<Set<string>>(new Set());
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
@@ -233,8 +240,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     { label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
     { label: 'Edge Crispness', val: edgeProtection, set: setEdgeProtection, max: 100, step: 10, info: 'bleed', desc: 'Tightens color boundaries.' },
     { label: 'Corner Protection', val: vertexInertia, set: setVertexInertia, max: 100, step: 10, info: 'inertia', desc: 'Preserves sharp vertices.' },
-    { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' },
-    ...(hasTransparency ? [{ label: 'Alpha Smoothing', val: alphaSmoothness, set: setAlphaSmoothness, max: 100, step: 5, info: 'alpha', desc: 'Controls transparency edge smoothing. 0% = sharp edges (preserves exact alpha), 100% = smooth edges (interpolated alpha).' }] : [])
+    { label: 'Edge Smoothing', val: smoothingLevels, set: setSmoothingLevels, max: 100, step: 5, info: 'subpixel', desc: 'Applies anti-aliasing.' }
   ];
 
   return (
@@ -271,7 +277,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <ExpandableInfoBox isOpen={activeInfos.has('scale')}>
           {isSvg ? (
             <><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Scaling is disabled; SVGs maintain infinite resolution.</>
-          ) : (
+          ) : pixelArtConfig.enabled ? (
+            <><div className="flex items-center gap-2 text-blue-600 font-bold mb-1"><i className="fa-solid fa-cube"></i><span>Pixel Art Mode Active</span></div> Scale value is used as maximum dimension. The largest integer scale that fits will be applied.</>  ) : (
             "Resizes to NationStates dimensions (535x355px or 321x568px), with automatic further compression if file size exceeds 150kb."
           )}
         </ExpandableInfoBox>
@@ -290,21 +297,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           title="Cleanup & Quality"
           isEnabled={!disablePostProcessing}
           onToggleEnabled={() => setDisablePostProcessing(!disablePostProcessing)}
-          toggleDisabled={isSvg}
-          disabledStyle={disablePostProcessing || isSvg}
-          infoKey={isSvg ? 'svg-pp' : undefined}
-          isInfoActive={activeInfos.has('svg-pp')}
-          onInfoToggle={isSvg ? () => toggleInfo('svg-pp') : undefined}
+          toggleDisabled={isSvg || pixelArtConfig.enabled}
+          disabledStyle={disablePostProcessing || isSvg || pixelArtConfig.enabled}
+          infoKey={(isSvg || pixelArtConfig.enabled) ? 'disabled-pp' : undefined}
+          isInfoActive={activeInfos.has('disabled-pp')}
+          onInfoToggle={(isSvg || pixelArtConfig.enabled) ? () => toggleInfo('disabled-pp') : undefined}
         />
 
-        {isSvg && (
-          <ExpandableInfoBox isOpen={activeInfos.has('svg-pp')}>
-            <div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>
-            Processing is disabled to preserve original vector precision.
+        {(isSvg || pixelArtConfig.enabled) && (
+          <ExpandableInfoBox isOpen={activeInfos.has('disabled-pp')}>
+            {isSvg ? (
+              <><div className="flex items-center gap-2 text-amber-600 font-bold mb-1"><i className="fa-solid fa-triangle-exclamation"></i><span>SVG detected</span></div>Processing is disabled to preserve original vector precision.</>
+            ) : (
+              <><div className="flex items-center gap-2 text-blue-600 font-bold mb-1"><i className="fa-solid fa-cube"></i><span>Pixel Art Mode Active</span></div>Post-processing is disabled to maintain sharp pixel boundaries and avoid anti-aliasing.</>
+            )}
           </ExpandableInfoBox>
         )}
 
-        <div className={`space-y-2 transition-opacity ${disablePostProcessing ? 'opacity-40 pointer-events-none' : ''}`}>
+        <div className={`space-y-2 transition-opacity ${disablePostProcessing || pixelArtConfig.enabled ? 'opacity-40 pointer-events-none' : ''}`}>
           {cleanupControls.map(ctrl => (
             <SliderControl
               key={ctrl.label}
@@ -322,7 +332,184 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* 4. Color Mapping Section */}
+      {/* 4. Transparency Section */}
+      {image && hasTransparency && !isSvg && (
+        <div className="space-y-2">
+          <SectionHeader 
+            title="Transparency"
+            isEnabled={preserveTransparency}
+            onToggleEnabled={() => setPreserveTransparency(!preserveTransparency)}
+            disabledStyle={!preserveTransparency}
+            infoKey="transparency"
+            isInfoActive={activeInfos.has('transparency')}
+            onInfoToggle={() => toggleInfo('transparency')}
+          />
+
+          <ExpandableInfoBox isOpen={activeInfos.has('transparency')}>
+            Controls how transparent areas are handled during processing.
+          </ExpandableInfoBox>
+
+          <div className={`transition-opacity ${!preserveTransparency ? 'opacity-40 pointer-events-none' : ''}`}>
+            <div className="space-y-2">
+              <SliderControl
+                label="Alpha Smoothing"
+                value={alphaSmoothness}
+                max={100}
+                step={5}
+                onChange={setAlphaSmoothness}
+                infoKey="alpha"
+                description="Controls transparency edge smoothing. 0% = sharp edges (preserves exact alpha), 100% = smooth edges (interpolated alpha)."
+                isInfoOpen={activeInfos.has('alpha')}
+                onInfoToggle={() => toggleInfo('alpha')}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Pixel Art Mode Section */}
+      {image && !isSvg && (
+        <div className="space-y-2">
+          <SectionHeader 
+            title="Pixel Art Mode"
+            isEnabled={pixelArtConfig.enabled}
+            onToggleEnabled={() => {
+              const willEnable = !pixelArtConfig.enabled;
+              setPixelArtConfig(prev => ({ ...prev, enabled: willEnable }));
+              if (willEnable && colorGroupingDistance > 15) {
+                setColorGroupingDistance(10);
+              }
+            }}
+            infoKey="pixelart"
+            isInfoActive={activeInfos.has('pixelart')}
+            onInfoToggle={() => toggleInfo('pixelart')}
+          />
+
+          <ExpandableInfoBox isOpen={activeInfos.has('pixelart')}>
+            Reduces image to distinct pixels by sampling majority color in each block.
+          </ExpandableInfoBox>
+            
+          {pixelArtConfig.enabled && (
+            <div className="space-y-2">
+              {/* Pixel Size */}
+              <DualNumberInput
+                label="Pixel Size"
+                value1={pixelArtConfig.pixelWidth}
+                value2={pixelArtConfig.pixelHeight}
+                min1={1}
+                max1={32}
+                min2={1}
+                max2={32}
+                locked={pixelArtConfig.lockAspect}
+                onValue1Change={(val) => setPixelArtConfig(prev => {
+                  const newPixelWidth = val;
+                  const newPixelHeight = prev.lockAspect ? val : prev.pixelHeight;
+                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                  return {
+                    ...prev,
+                    pixelWidth: newPixelWidth,
+                    pixelHeight: newPixelHeight,
+                    offsetX: Math.min(prev.offsetX, maxOffsetX),
+                    offsetY: Math.min(prev.offsetY, maxOffsetY),
+                  };
+                })}
+                onValue2Change={(val) => setPixelArtConfig(prev => {
+                  const newPixelHeight = val;
+                  const newPixelWidth = prev.lockAspect ? val : prev.pixelWidth;
+                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                  return {
+                    ...prev,
+                    pixelHeight: newPixelHeight,
+                    pixelWidth: newPixelWidth,
+                    offsetX: Math.min(prev.offsetX, maxOffsetX),
+                    offsetY: Math.min(prev.offsetY, maxOffsetY),
+                  };
+                })}
+                onLockToggle={() => setPixelArtConfig(prev => {
+                  const newLockAspect = !prev.lockAspect;
+                  const newPixelWidth = prev.pixelWidth;
+                  const newPixelHeight = newLockAspect ? prev.pixelWidth : prev.pixelHeight;
+                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                  return {
+                    ...prev,
+                    lockAspect: newLockAspect,
+                    pixelHeight: newPixelHeight,
+                    offsetX: Math.min(prev.offsetX, maxOffsetX),
+                    offsetY: Math.min(prev.offsetY, maxOffsetY),
+                  };
+                })}
+                infoKey="pixelsize"
+                isInfoOpen={activeInfos.has('pixelsize')}
+                onInfoToggle={() => toggleInfo('pixelsize')}
+                infoContent={
+                  <ExpandableInfoBox isOpen={activeInfos.has('pixelsize')}>
+                    Set the width and height of each pixel block in pixels. Lock aspect ratio to maintain square pixels.
+                  </ExpandableInfoBox>
+                }
+              />
+
+              {/* Offset Controls */}
+              {(pixelArtConfig.pixelWidth > 1 || pixelArtConfig.pixelHeight > 1) && (
+                <div className="space-y-2 mt-2">
+                  <DualNumberInput
+                    label="Offset"
+                    value1={pixelArtConfig.offsetX}
+                    value2={pixelArtConfig.offsetY}
+                    min1={0}
+                    max1={pixelArtConfig.pixelWidth - 1}
+                    min2={0}
+                    max2={pixelArtConfig.pixelHeight - 1}
+                    locked={pixelArtConfig.lockOffset}
+                    onValue1Change={(val) => setPixelArtConfig(prev => ({
+                      ...prev,
+                      offsetX: val,
+                      offsetY: prev.lockOffset ? val : prev.offsetY
+                    }))}
+                    onValue2Change={(val) => setPixelArtConfig(prev => ({
+                      ...prev,
+                      offsetY: val
+                    }))}
+                    onLockToggle={() => setPixelArtConfig(prev => {
+                      const newLockOffset = !prev.lockOffset;
+                      return {
+                        ...prev,
+                        lockOffset: newLockOffset,
+                        offsetY: newLockOffset ? prev.offsetX : prev.offsetY,
+                      };
+                    })}
+                    infoKey="offset"
+                    isInfoOpen={activeInfos.has('offset')}
+                    onInfoToggle={() => toggleInfo('offset')}
+                    infoContent={
+                      <ExpandableInfoBox isOpen={activeInfos.has('offset')}>
+                        Fine-tune pixel grid alignment using horizontal (X) and vertical (Y) offsets. Values range from 0 to the pixel size minus 1.
+                      </ExpandableInfoBox>
+                    }
+                    lockTitle="Lock offsets"
+                    unlockTitle="Unlock offsets"
+                  />
+                </div>
+              )}
+
+              {/* Show Grid Checkbox */}
+              <label className="flex items-center gap-2 text-[10px] text-[#333] cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={pixelArtConfig.showGrid}
+                  onChange={(e) => setPixelArtConfig(prev => ({ ...prev, showGrid: e.target.checked }))}
+                  className="w-3 h-3"
+                />
+                <span className="font-bold uppercase tracking-wide">Show Grid Overlay</span>
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 6. Color Mapping Section */}
       <div className="px-0.5">
         <SectionHeader 
           title="Color Mapping"
@@ -356,7 +543,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* 5. Color Groups List */}
+      {/* 7. Color Groups List */}
       <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
         {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
