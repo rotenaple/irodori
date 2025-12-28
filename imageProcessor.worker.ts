@@ -177,9 +177,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         let lowResIdxMap = new Int16Array(nativeWidth * nativeHeight);
         
         // Store original alpha channel at native resolution for nearest-neighbor lookup
-        const nativeAlpha = new Uint8ClampedArray(nativeWidth * nativeHeight);
-        for (let i = 0; i < nativePixelData.length; i += 4) {
-            nativeAlpha[i / 4] = nativePixelData[i + 3];
+        let nativeAlpha: Uint8ClampedArray | null = null;
+        if (hasTransparency) {
+            nativeAlpha = new Uint8ClampedArray(nativeWidth * nativeHeight);
+            for (let i = 0; i < nativePixelData.length; i += 4) {
+                nativeAlpha[i / 4] = nativePixelData[i + 3];
+            }
         }
 
         // 1. Setup Maps for Fast Lookup
