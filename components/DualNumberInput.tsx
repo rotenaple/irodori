@@ -61,7 +61,13 @@ export const DualNumberInput: React.FC<DualNumberInputProps> = ({
             min={min1}
             max={max1}
             value={value1}
-            onChange={(e) => onValue1Change(Math.max(min1, Math.min(max1, parseInt(e.target.value) || min1)))}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value, 10);
+              const safeValue = Number.isNaN(parsed)
+                ? min1
+                : Math.max(min1, Math.min(max1, parsed));
+              onValue1Change(safeValue);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -92,7 +98,13 @@ export const DualNumberInput: React.FC<DualNumberInputProps> = ({
             max={max2}
             value={value2}
             disabled={locked}
-            onChange={(e) => onValue2Change(Math.max(min2, Math.min(max2, parseInt(e.target.value) || min2)))}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value, 10);
+              const safeValue = Number.isNaN(parsed)
+                ? min2
+                : Math.max(min2, Math.min(max2, parsed));
+              onValue2Change(safeValue);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 e.preventDefault();

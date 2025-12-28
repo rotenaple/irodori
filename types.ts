@@ -40,7 +40,7 @@ export interface PixelArtConfig {
   showGrid: boolean;
   offsetX: number;
   offsetY: number;
-  lockOffset?: boolean;
+  lockOffset: boolean;
 }
 
 export type ProcessingState = 'idle' | 'processing' | 'completed';
