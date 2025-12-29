@@ -871,7 +871,6 @@ const App: React.FC = () => {
                   baseHue={calculateGroupBaseHue(members)}
                   currentSettings={supergroup.tint}
                   colorMembers={members}
-                  showPreviews={activeTab === 'original'}
                   onChange={(settings) => {
                     if (settings) {
                       setSupergroups(prev => prev.map(sg => sg.id === tintModalGroupId ? { ...sg, tint: settings } : sg));
@@ -923,7 +922,6 @@ const App: React.FC = () => {
                 baseHue={colorGroups.find(g => g.id === tintModalGroupId)?.baseHue ?? 0}
                 currentSettings={tintOverrides[tintModalGroupId]}
                 colorMembers={colorGroups.find(g => g.id === tintModalGroupId)?.members ?? []}
-                showPreviews={activeTab === 'original'}
                 onChange={(settings) => {
                   if (settings) {
                     setTintOverrides(prev => ({ ...prev, [tintModalGroupId]: settings }));
