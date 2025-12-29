@@ -165,6 +165,7 @@ interface ControlPanelProps {
   setTintModalGroupId: (id: string | null) => void;
   supergroups: Supergroup[];
   setSupergroups: React.Dispatch<React.SetStateAction<Supergroup[]>>;
+  activeTab?: 'original' | 'processed';
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -180,10 +181,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle,
   pixelArtConfig, setPixelArtConfig,
   /* recolorMode, setRecolorMode, */ tintOverrides, setTintOverrides, setTintModalGroupId,
-  supergroups, setSupergroups
+  supergroups, setSupergroups, activeTab = 'original'
 }) => {
   const [activeInfos, setActiveInfos] = useState<Set<string>>(new Set());
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
+  const [activeGroupPopup, setActiveGroupPopup] = useState<string | null>(null);
+  const [activeSubcolorPopup, setActiveSubcolorPopup] = useState<{ groupId: string, colorHex: string } | null>(null);
   const [expandedSubcolors, setExpandedSubcolors] = useState<Set<string>>(new Set());
   const [subcolorLimit, setSubcolorLimit] = useState(16);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
@@ -287,8 +290,20 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       if (mobilePopup && !target.closest('.mobile-color-popup') && !target.closest('.subcolor-btn')) {
         setMobilePopup(null);
       }
+      if (activeGroupPopup && !target.closest('.group-popup-menu') && !target.closest('.group-action-btn')) {
+        setActiveGroupPopup(null);
+      }
+      if (activeSubcolorPopup && !target.closest('.subcolor-popup-menu') && !target.closest('.subcolor-item')) {
+        setActiveSubcolorPopup(null);
+      }
     };
-  }, [mobilePopup]);
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [mobilePopup, activeGroupPopup, activeSubcolorPopup]);
 
   const addToSupergroup = (supergroupId: string, groupId: string) => {
     setSupergroups(prev => prev.map(sg => {
@@ -443,31 +458,147 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             title={overrideColor ? `Override: ${overrideColor}\nClick to change` : "Set Recolor Override"}
           >
             {!overrideColor && <i className="fa-solid fa-eye-dropper text-xs"></i>}
-            {overrideColor && (
-                <span className="font-mono text-[9px] font-bold text-white/90 drop-shadow-md uppercase">
-                  {overrideColor.replace('#', '')}
-                </span>
-            )}
           </button>
 
+          {/* Mobile Actions */}
+          {isTouchDevice && (
+             <div className="relative ml-1">
+               <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveGroupPopup(activeGroupPopup === group.id ? null : group.id);
+                  }}
+                  className={`
+                    w-8 h-8 rounded-md flex items-center justify-center transition-all active:scale-95 shadow-sm border border-black/5 group-action-btn
+                    ${activeGroupPopup === group.id || (mobileViewTarget?.id === group.id && mobileViewTarget?.type === 'group')
+                      ? 'bg-indigo-500 text-white border-indigo-600' 
+                      : 'bg-white text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                    }
+                  `}
+                  title="Group Actions"
+               >
+                 <i className="fa-solid fa-ellipsis-vertical text-xs"></i>
+               </button>
+
+               {/* Group Popup */}
+               {activeGroupPopup === group.id && (
+                 <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden group-popup-menu flex flex-col">
+                    
+                    {/* View Option */}
+                    {activeTab === 'original' && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onMobileViewToggle(group.id, 'group');
+                                setActiveGroupPopup(null);
+                            }}
+                            className={`w-full text-left px-3 py-3 text-xs flex items-center gap-2 border-b border-slate-100 hover:bg-slate-50 ${mobileViewTarget?.id === group.id && mobileViewTarget?.type === 'group' ? 'text-blue-600 font-bold bg-blue-50' : 'text-slate-600'}`}
+                        >
+                            <i className={`fa-solid ${mobileViewTarget?.id === group.id && mobileViewTarget?.type === 'group' ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                            <span>{mobileViewTarget?.id === group.id && mobileViewTarget?.type === 'group' ? 'Stop Viewing' : 'Highlight this Group'}</span>
+                        </button>
+                    )}
+
+                    <div className="bg-slate-50 px-3 py-2 border-b border-slate-100 text-[10px] font-bold uppercase text-slate-500 tracking-wider">
+                      Merge With...
+                    </div>
+                    <div>
+                      {colorGroups.filter(g => g.id !== group.id).map(g => (
+                        <button
+                          key={g.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMergeGroups(group.id, g.id);
+                            setActiveGroupPopup(null);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 border-b border-slate-50 last:border-0"
+                        >
+                          <span className="w-3 h-3 rounded-full border border-black/10" style={{ backgroundColor: g.representativeHex }}></span>
+                          <span>{g.representativeHex}</span>
+                        </button>
+                      ))}
+                      {colorGroups.filter(g => g.id !== group.id).length === 0 && (
+                        <div className="px-3 py-2 text-[10px] italic text-slate-400">No other groups</div>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-50 px-3 py-2 border-y border-slate-100 text-[10px] font-bold uppercase text-slate-500 tracking-wider">
+                      Add to Supergroup...
+                    </div>
+                    <div>
+                       {/* Existing Supergroups */}
+                       {supergroups.map(sg => {
+                         const members = sg.memberGroupIds.map(gid => colorGroups.find(g => g.id === gid)).filter(Boolean);
+                         return (
+                         <button
+                            key={sg.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addToSupergroup(sg.id, group.id);
+                              setActiveGroupPopup(null);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-2 border-b border-slate-50 last:border-0"
+                         >
+                           <i className="fa-solid fa-layer-group text-[10px] shrink-0"></i>
+                           <div className="flex items-center -space-x-1.5 shrink-0">
+                               {members.map((m: any) => (
+                                 <div key={m.id} className="w-3 h-3 rounded-full border border-white shadow-sm relative z-0" style={{ backgroundColor: m.representativeHex }} />
+                               ))}
+                           </div>
+                           <div className="text-[9px] text-slate-400 font-mono truncate min-w-0 flex-1">
+                             {members.map((m: any) => m.representativeHex).join(', ')}
+                           </div>
+                         </button>
+                         );
+                       })}
+                       
+                       {/* Create New Supergroup with... */}
+                       {colorGroups
+                         .filter(g => g.id !== group.id && !supergroups.some(sg => sg.memberGroupIds.includes(g.id)))
+                         .map(g => (
+                           <button
+                              key={`new-sg-${g.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                createSupergroup([group.id, g.id]);
+                                setActiveGroupPopup(null);
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-2 border-b border-slate-50 last:border-0"
+                           >
+                             <i className="fa-solid fa-plus text-[10px]"></i>
+                             <span className="w-3 h-3 rounded-full border border-black/10" style={{ backgroundColor: g.representativeHex }}></span>
+                             <span>New w/ {g.representativeHex}</span>
+                           </button>
+                         ))
+                       }
+
+                       {supergroups.length === 0 && colorGroups.filter(g => g.id !== group.id && !supergroups.some(sg => sg.memberGroupIds.includes(g.id))).length === 0 && (
+                          <div className="px-3 py-2 text-[10px] italic text-slate-400">No options available</div>
+                       )}
+                    </div>
+                 </div>
+               )}
+             </div>
+          )}
+
           {/* Actions */}
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 ml-1">
             {isSupergroupMember && (
               <button
                 onClick={() => ungroupFromSupergroup(group.id)}
-                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                className="w-8 h-8 rounded-md flex items-center justify-center transition-all active:scale-95 shadow-sm border border-black/5 bg-white text-slate-400 hover:text-slate-600 hover:bg-slate-50"
                 title="Remove from Supergroup"
               >
-                <i className="fa-solid fa-arrow-right-from-bracket text-[10px]"></i>
+                <i className="fa-solid fa-arrow-right-from-bracket text-xs"></i>
               </button>
             )}
             {isManual && (
               <button
                 onClick={() => onRemoveManualLayer(group.id)}
-                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                className="w-8 h-8 rounded-md flex items-center justify-center transition-all active:scale-95 shadow-sm border border-black/5 bg-white text-slate-400 hover:text-red-600 hover:bg-red-50"
                 title="Delete Manual Group"
               >
-                <i className="fa-solid fa-trash text-[10px]"></i>
+                <i className="fa-solid fa-trash text-xs"></i>
               </button>
             )}
           </div>
@@ -478,19 +609,54 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="pl-7">
             <div className="flex flex-wrap gap-0.5">
               {group.members.slice(0, expandedSubcolors.has(group.id) ? undefined : subcolorLimit).map((member: any) => (
-                <div
-                  key={member.hex}
-                  className="w-3 h-3 rounded-full border border-black/5 shadow-sm cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
-                  style={{ backgroundColor: member.hex }}
-                  title={`${member.hex} (${member.count} pixels)\nDrag to ungroup`}
-                  draggable={true}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('text/plain', member.hex);
-                    e.dataTransfer.effectAllowed = 'move';
-                    setDraggedItem({ type: 'color', colorHex: member.hex, groupId: group.id });
-                    e.stopPropagation();
-                  }}
-                />
+                <div key={member.hex} className="relative subcolor-item">
+                  <div
+                    className="w-3 h-3 rounded-full border border-black/5 shadow-sm cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                    style={{ backgroundColor: member.hex }}
+                    title={`${member.hex} (${member.count} pixels)\nDrag to ungroup`}
+                    draggable={true}
+                    onMouseEnter={() => setHoveredColor(member.hex)}
+                    onMouseLeave={() => setHoveredColor(null)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', member.hex);
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDraggedItem({ type: 'color', colorHex: member.hex, groupId: group.id });
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      if (isTouchDevice) {
+                        e.stopPropagation();
+                        setActiveSubcolorPopup({ groupId: group.id, colorHex: member.hex });
+                      }
+                    }}
+                  />
+                  {isTouchDevice && activeSubcolorPopup?.groupId === group.id && activeSubcolorPopup?.colorHex === member.hex && (
+                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 bg-white rounded-lg shadow-xl border border-slate-200 subcolor-popup-menu flex flex-col w-32 overflow-hidden">
+                       {activeTab === 'original' && (
+                       <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMobileViewToggle(member.hex, 'color');
+                            setActiveSubcolorPopup(null);
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-slate-100 hover:bg-slate-50 ${mobileViewTarget?.id === member.hex ? 'text-blue-600 font-bold bg-blue-50' : 'text-slate-600'}`}
+                       >
+                         <i className="fa-solid fa-eye"></i> Highlight
+                       </button>
+                       )}
+                       <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMoveColor(member.hex, group.id, 'new');
+                            setActiveSubcolorPopup(null);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-2"
+                       >
+                         <i className="fa-solid fa-plus-circle"></i> New Group
+                       </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
             {group.members.length > subcolorLimit && (
@@ -1026,7 +1192,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   <i className={`fa-solid fa-droplet text-[9px] ${tintPreviewHex ? 'text-white drop-shadow-md' : 'text-slate-300'}`}></i>
                 </button>
               </div>
-              <div className="pl-2 border-l-2 border-slate-200 flex flex-col gap-1">
+              <div className="px-1 flex flex-col gap-1">
                 {sg.memberGroupIds.map(gid => {
                   const group = colorGroups.find(g => g.id === gid);
                   if (!group) return null;

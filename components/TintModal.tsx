@@ -7,17 +7,18 @@ interface TintModalProps {
   baseHue: number;
   currentSettings: TintSettings | undefined;
   colorMembers: ColorInstance[];
+  showPreviews?: boolean;
   onChange: (settings: TintSettings | null) => void;
   onClose: () => void;
 }
 
 export const TintModal: React.FC<TintModalProps> = ({
-  groupId, baseHue, currentSettings, colorMembers, onChange, onClose
+  groupId, baseHue, currentSettings, colorMembers, showPreviews = true, onChange, onClose
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Initialize with current settings or defaults
-  const [hue, setHue] = useState(currentSettings?.hue ?? baseHue);
+  const [hue, setHue] = useState(currentSettings?.hue ?? Math.round(baseHue));
   const [saturation, setSaturation] = useState(currentSettings?.saturation ?? 0);
   const [lightness, setLightness] = useState(currentSettings?.lightness ?? 0);
   const [hueForce, setHueForce] = useState(currentSettings?.hueForce ?? 100);
@@ -103,6 +104,7 @@ export const TintModal: React.FC<TintModalProps> = ({
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 scrollbar-thin">
         <div className="space-y-4">
           {/* Compact Color Preview - Original | Tinted side by side */}
+          {showPreviews && (
           <div className="grid grid-cols-2 gap-2">
             {/* Original Colors */}
             <div className="space-y-1">
@@ -142,6 +144,7 @@ export const TintModal: React.FC<TintModalProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* Unified Hue Picker - 1D rainbow */}
           <div className="space-y-2">
@@ -153,7 +156,7 @@ export const TintModal: React.FC<TintModalProps> = ({
               onMouseMove={(e) => e.buttons === 1 && handleCanvasInteract(e)}
               onTouchMove={handleCanvasInteract}
             />
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
                 <input 
@@ -161,16 +164,20 @@ export const TintModal: React.FC<TintModalProps> = ({
                   onChange={(e) => setHue(Math.max(0, Math.min(360, parseInt(e.target.value) || 0)))}
                   className="flex-1 bg-white border border-slate-200 rounded-md py-1 px-2 text-center font-mono text-xs text-slate-600 h-7 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
-                <span className="text-[9px] text-slate-400">°</span>
+                <span className="text-[9px] text-slate-400"></span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Strength</span>
                 <input 
                   type="range" min="0" max="100" step="1" value={hueForce}
                   onChange={(e) => setHueForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
                 />
-                <span className="text-[9px] font-mono text-slate-500 w-8 text-right">{hueForce}%</span>
+                <input 
+                  type="number" min="0" max="100" value={hueForce}
+                  onChange={(e) => setHueForce(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-12 bg-white border border-slate-200 rounded-md py-0.5 text-center font-mono text-[10px] text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
               </div>
             </div>
           </div>
@@ -178,13 +185,13 @@ export const TintModal: React.FC<TintModalProps> = ({
           {/* Saturation */}
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Saturation</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
                 <input 
                   type="range" min="-100" max="100" step="1" value={saturation}
                   onChange={(e) => setSaturation(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
                 />
                 <input 
                   type="number" min="-100" max="100" value={saturation}
@@ -197,9 +204,13 @@ export const TintModal: React.FC<TintModalProps> = ({
                 <input 
                   type="range" min="0" max="100" step="1" value={saturationForce}
                   onChange={(e) => setSaturationForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
                 />
-                <span className="text-[9px] font-mono text-slate-500 w-8 text-right">{saturationForce}%</span>
+                <input 
+                  type="number" min="0" max="100" value={saturationForce}
+                  onChange={(e) => setSaturationForce(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-12 bg-white border border-slate-200 rounded-md py-0.5 text-center font-mono text-[10px] text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
               </div>
             </div>
           </div>
@@ -207,13 +218,13 @@ export const TintModal: React.FC<TintModalProps> = ({
           {/* Lightness */}
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Lightness</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
                 <input 
                   type="range" min="-100" max="100" step="1" value={lightness}
                   onChange={(e) => setLightness(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
                 />
                 <input 
                   type="number" min="-100" max="100" value={lightness}
@@ -226,9 +237,13 @@ export const TintModal: React.FC<TintModalProps> = ({
                 <input 
                   type="range" min="0" max="100" step="1" value={lightnessForce}
                   onChange={(e) => setLightnessForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-[#33569a]"
+                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
                 />
-                <span className="text-[9px] font-mono text-slate-500 w-8 text-right">{lightnessForce}%</span>
+                <input 
+                  type="number" min="0" max="100" value={lightnessForce}
+                  onChange={(e) => setLightnessForce(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-12 bg-white border border-slate-200 rounded-md py-0.5 text-center font-mono text-[10px] text-slate-600 h-6 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
               </div>
             </div>
           </div>
@@ -242,7 +257,7 @@ export const TintModal: React.FC<TintModalProps> = ({
             className="h-11 px-4 bg-white text-red-500 border border-red-100 rounded-xl font-bold uppercase tracking-widest text-[9px] shadow-sm active:scale-[0.98] transition-all hover:bg-red-50 flex items-center justify-center gap-2 whitespace-nowrap"
             title="Remove tint from this group"
           >
-            <i className="fa-solid fa-times"></i> Remove Tint
+            Reset
           </button>
         )}
         <button 
