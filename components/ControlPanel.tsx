@@ -126,6 +126,7 @@ interface ControlPanelProps {
   preserveTransparency: boolean;
   setPreserveTransparency: (v: boolean) => void;
   image: string | null;
+  imageDimensions: { width: number, height: number } | null;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   colorGroups: ColorGroup[];
   manualLayerIds: string[];
@@ -170,7 +171,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   upscaleFactor, setUpscaleFactor, denoiseRadius, setDenoiseRadius, smoothingLevels, setSmoothingLevels,
   vertexInertia, setVertexInertia, edgeProtection, setEdgeProtection, colorGroupingDistance, setColorGroupingDistance,
   alphaSmoothness, setAlphaSmoothness, hasTransparency, preserveTransparency, setPreserveTransparency,
-  image, onImageUpload,
+  image, onImageUpload, imageDimensions,
   colorGroups, manualLayerIds, selectedInGroup, enabledGroups, setEnabledGroups, colorOverrides,
   onAddManualLayer, onRemoveManualLayer, onEditTarget, onMoveColor, onMergeGroups, onRecomputeGroups,
   setHoveredColor, hoveredGroupId, setHoveredGroupId, draggedItem, setDraggedItem, totalSamples,
@@ -187,7 +188,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const [subcolorLimit, setSubcolorLimit] = useState(16);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
+  const [pixelSizeMode, setPixelSizeMode] = useState<'size' | 'resolution'>('size');
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const maxPixelSize = imageDimensions 
+    ? Math.max(32, Math.floor(Math.min(imageDimensions.width, imageDimensions.height) / 4)) 
+    : 32;
+
+  useEffect(() => {
+    if (pixelArtConfig.enabled) {
+      if (pixelArtConfig.pixelWidth > maxPixelSize || pixelArtConfig.pixelHeight > maxPixelSize) {
+        setPixelArtConfig(prev => ({
+          ...prev,
+          pixelWidth: Math.min(prev.pixelWidth, maxPixelSize),
+          pixelHeight: Math.min(prev.pixelHeight, maxPixelSize)
+        }));
+      }
+    }
+  }, [maxPixelSize, pixelArtConfig.enabled, pixelArtConfig.pixelWidth, pixelArtConfig.pixelHeight, setPixelArtConfig]);
 
   const createSupergroup = (groupIds: string[]) => {
     if (groupIds.length < 2) return;
@@ -653,40 +671,223 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <div className="space-y-2">
               {/* Pixel Size */}
               <DualNumberInput
-                label="Pixel Size"
-                value1={pixelArtConfig.pixelWidth}
-                value2={pixelArtConfig.pixelHeight}
+                label="Grid Settings"
+                value1={pixelSizeMode === 'resolution' && imageDimensions 
+                  ? Math.round(imageDimensions.width / pixelArtConfig.pixelWidth) 
+                  : pixelArtConfig.pixelWidth}
+                value2={pixelSizeMode === 'resolution' && imageDimensions 
+                  ? Math.round(imageDimensions.height / pixelArtConfig.pixelHeight) 
+                  : pixelArtConfig.pixelHeight}
                 min1={1}
-                max1={32}
+                max1={pixelSizeMode === 'resolution' && imageDimensions ? imageDimensions.width : maxPixelSize}
                 min2={1}
-                max2={32}
+                max2={pixelSizeMode === 'resolution' && imageDimensions ? imageDimensions.height : maxPixelSize}
                 locked={pixelArtConfig.lockAspect}
-                onValue1Change={(val) => setPixelArtConfig(prev => {
-                  const newPixelWidth = val;
-                  const newPixelHeight = prev.lockAspect ? val : prev.pixelHeight;
-                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
-                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
-                  return {
-                    ...prev,
-                    pixelWidth: newPixelWidth,
-                    pixelHeight: newPixelHeight,
-                    offsetX: Math.min(prev.offsetX, maxOffsetX),
-                    offsetY: Math.min(prev.offsetY, maxOffsetY),
-                  };
-                })}
-                onValue2Change={(val) => setPixelArtConfig(prev => {
-                  const newPixelHeight = val;
-                  const newPixelWidth = prev.lockAspect ? val : prev.pixelWidth;
-                  const maxOffsetX = Math.max(0, newPixelWidth - 1);
-                  const maxOffsetY = Math.max(0, newPixelHeight - 1);
-                  return {
-                    ...prev,
-                    pixelHeight: newPixelHeight,
-                    pixelWidth: newPixelWidth,
-                    offsetX: Math.min(prev.offsetX, maxOffsetX),
-                    offsetY: Math.min(prev.offsetY, maxOffsetY),
-                  };
-                })}
+                headerRight={
+                  <div className="flex bg-slate-200 rounded p-0.5 gap-0.5">
+                    <button
+                      onClick={() => {
+                        setPixelSizeMode('size');
+                        setPixelArtConfig(prev => ({
+                          ...prev,
+                          pixelWidth: Math.max(1, Math.round(prev.pixelWidth)),
+                          pixelHeight: Math.max(1, Math.round(prev.pixelHeight))
+                        }));
+                      }}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold rounded transition-colors ${
+                        pixelSizeMode === 'size' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-500 hover:text-slate-600'
+                      }`}
+                      title="Step by Pixel Size"
+                    >
+                      PX
+                    </button>
+                    <button
+                      onClick={() => {
+                        setPixelSizeMode('resolution');
+                        if (imageDimensions) {
+                          setPixelArtConfig(prev => {
+                            const resW = Math.round(imageDimensions.width / prev.pixelWidth);
+                            const resH = Math.round(imageDimensions.height / prev.pixelHeight);
+                            const newW = imageDimensions.width / Math.max(1, resW);
+                            const newH = imageDimensions.height / Math.max(1, resH);
+                            return {
+                              ...prev,
+                              pixelWidth: newW,
+                              pixelHeight: newH
+                            };
+                          });
+                        }
+                      }}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold rounded transition-colors ${
+                        pixelSizeMode === 'resolution' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-500 hover:text-slate-600'
+                      }`}
+                      title="Step by Resolution"
+                    >
+                      RES
+                    </button>
+                  </div>
+                }
+                onValue1Change={(val) => {
+                  if (pixelSizeMode === 'resolution' && imageDimensions) {
+                    // val is target resolution
+                    const targetRes = Math.max(1, val);
+                    const newPixelWidth = imageDimensions.width / targetRes;
+                    setPixelArtConfig(prev => {
+                      const newPixelHeight = prev.lockAspect ? newPixelWidth : prev.pixelHeight;
+                      const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                      const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                      return {
+                        ...prev,
+                        pixelWidth: newPixelWidth,
+                        pixelHeight: newPixelHeight,
+                        offsetX: Math.min(prev.offsetX, maxOffsetX),
+                        offsetY: Math.min(prev.offsetY, maxOffsetY),
+                      };
+                    });
+                  } else {
+                    setPixelArtConfig(prev => {
+                      const newPixelWidth = val;
+                      const newPixelHeight = prev.lockAspect ? val : prev.pixelHeight;
+                      const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                      const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                      return {
+                        ...prev,
+                        pixelWidth: newPixelWidth,
+                        pixelHeight: newPixelHeight,
+                        offsetX: Math.min(prev.offsetX, maxOffsetX),
+                        offsetY: Math.min(prev.offsetY, maxOffsetY),
+                      };
+                    });
+                  }
+                }}
+                onValue2Change={(val) => {
+                  if (pixelSizeMode === 'resolution' && imageDimensions) {
+                    // val is target resolution
+                    const targetRes = Math.max(1, val);
+                    const newPixelHeight = imageDimensions.height / targetRes;
+                    setPixelArtConfig(prev => {
+                      const newPixelWidth = prev.lockAspect ? newPixelHeight : prev.pixelWidth;
+                      const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                      const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                      return {
+                        ...prev,
+                        pixelHeight: newPixelHeight,
+                        pixelWidth: newPixelWidth,
+                        offsetX: Math.min(prev.offsetX, maxOffsetX),
+                        offsetY: Math.min(prev.offsetY, maxOffsetY),
+                      };
+                    });
+                  } else {
+                    setPixelArtConfig(prev => {
+                      const newPixelHeight = val;
+                      const newPixelWidth = prev.lockAspect ? val : prev.pixelWidth;
+                      const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                      const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                      return {
+                        ...prev,
+                        pixelHeight: newPixelHeight,
+                        pixelWidth: newPixelWidth,
+                        offsetX: Math.min(prev.offsetX, maxOffsetX),
+                        offsetY: Math.min(prev.offsetY, maxOffsetY),
+                      };
+                    });
+                  }
+                }}
+                onIncrement1={pixelSizeMode === 'resolution' ? () => {
+                  if (!imageDimensions) return;
+                  const currentRes = Math.round(imageDimensions.width / pixelArtConfig.pixelWidth);
+                  const targetRes = currentRes + 1;
+                  const newVal = Math.max(1, imageDimensions.width / targetRes);
+                  setPixelArtConfig(prev => {
+                    const newPixelWidth = newVal;
+                    const newPixelHeight = prev.lockAspect ? newVal : prev.pixelHeight;
+                    const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                    const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                    return {
+                      ...prev,
+                      pixelWidth: newPixelWidth,
+                      pixelHeight: newPixelHeight,
+                      offsetX: Math.min(prev.offsetX, maxOffsetX),
+                      offsetY: Math.min(prev.offsetY, maxOffsetY),
+                    };
+                  });
+                } : undefined}
+                onDecrement1={pixelSizeMode === 'resolution' ? () => {
+                  if (!imageDimensions) return;
+                  const currentRes = Math.round(imageDimensions.width / pixelArtConfig.pixelWidth);
+                  const targetRes = Math.max(1, currentRes - 1);
+                  const newVal = Math.max(1, imageDimensions.width / targetRes);
+                  setPixelArtConfig(prev => {
+                    const newPixelWidth = newVal;
+                    const newPixelHeight = prev.lockAspect ? newVal : prev.pixelHeight;
+                    const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                    const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                    return {
+                      ...prev,
+                      pixelWidth: newPixelWidth,
+                      pixelHeight: newPixelHeight,
+                      offsetX: Math.min(prev.offsetX, maxOffsetX),
+                      offsetY: Math.min(prev.offsetY, maxOffsetY),
+                    };
+                  });
+                } : undefined}
+                onIncrement2={pixelSizeMode === 'resolution' ? () => {
+                  if (!imageDimensions) return;
+                  const currentRes = Math.round(imageDimensions.height / pixelArtConfig.pixelHeight);
+                  const targetRes = currentRes + 1;
+                  const newVal = Math.max(1, imageDimensions.height / targetRes);
+                  setPixelArtConfig(prev => {
+                    const newPixelHeight = newVal;
+                    const newPixelWidth = prev.lockAspect ? newVal : prev.pixelWidth;
+                    const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                    const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                    return {
+                      ...prev,
+                      pixelWidth: newPixelWidth,
+                      pixelHeight: newPixelHeight,
+                      offsetX: Math.min(prev.offsetX, maxOffsetX),
+                      offsetY: Math.min(prev.offsetY, maxOffsetY),
+                    };
+                  });
+                } : undefined}
+                onDecrement2={pixelSizeMode === 'resolution' ? () => {
+                  if (!imageDimensions) return;
+                  const currentRes = Math.round(imageDimensions.height / pixelArtConfig.pixelHeight);
+                  const targetRes = Math.max(1, currentRes - 1);
+                  const newVal = Math.max(1, imageDimensions.height / targetRes);
+                  setPixelArtConfig(prev => {
+                    const newPixelHeight = newVal;
+                    const newPixelWidth = prev.lockAspect ? newVal : prev.pixelWidth;
+                    const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                    const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                    return {
+                      ...prev,
+                      pixelWidth: newPixelWidth,
+                      pixelHeight: newPixelHeight,
+                      offsetX: Math.min(prev.offsetX, maxOffsetX),
+                      offsetY: Math.min(prev.offsetY, maxOffsetY),
+                    };
+                  });
+                } : undefined}
+                onDecrement2={pixelSizeMode === 'resolution' ? () => {
+                  if (!imageDimensions) return;
+                  const currentRes = imageDimensions.height / pixelArtConfig.pixelHeight;
+                  const targetRes = Math.round(currentRes) + 1;
+                  const newVal = Math.min(maxPixelSize, Math.max(1, imageDimensions.height / targetRes));
+                  setPixelArtConfig(prev => {
+                    const newPixelHeight = newVal;
+                    const newPixelWidth = prev.lockAspect ? newVal : prev.pixelWidth;
+                    const maxOffsetX = Math.max(0, newPixelWidth - 1);
+                    const maxOffsetY = Math.max(0, newPixelHeight - 1);
+                    return {
+                      ...prev,
+                      pixelWidth: newPixelWidth,
+                      pixelHeight: newPixelHeight,
+                      offsetX: Math.min(prev.offsetX, maxOffsetX),
+                      offsetY: Math.min(prev.offsetY, maxOffsetY),
+                    };
+                  });
+                } : undefined}
                 onLockToggle={() => setPixelArtConfig(prev => {
                   const newLockAspect = !prev.lockAspect;
                   const newPixelWidth = prev.pixelWidth;

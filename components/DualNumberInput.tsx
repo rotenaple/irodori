@@ -19,6 +19,11 @@ interface DualNumberInputProps {
   separator?: string;
   lockTitle?: string;
   unlockTitle?: string;
+  onIncrement1?: () => void;
+  onDecrement1?: () => void;
+  onIncrement2?: () => void;
+  onDecrement2?: () => void;
+  headerRight?: React.ReactNode;
 }
 
 export const DualNumberInput: React.FC<DualNumberInputProps> = ({
@@ -39,19 +44,27 @@ export const DualNumberInput: React.FC<DualNumberInputProps> = ({
   infoContent,
   separator = '×',
   lockTitle = 'Lock aspect ratio',
-  unlockTitle = 'Unlock aspect ratio'
+  unlockTitle = 'Unlock aspect ratio',
+  onIncrement1,
+  onDecrement1,
+  onIncrement2,
+  onDecrement2,
+  headerRight
 }) => {
   return (
     <div className="space-y-0.5">
       <div className="flex justify-between items-center text-[10px] font-bold text-[#333] uppercase tracking-wide">
-        <span>{label}</span>
-        <button 
-          onClick={onInfoToggle}
-          className={`px-1 transition-colors ${isInfoOpen ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}
-          title="Information"
-        >
-          <i className="fa-solid fa-circle-info"></i>
-        </button>
+        <div className="flex items-center gap-2">
+          <span>{label}</span>
+          <button 
+            onClick={onInfoToggle}
+            className={`px-1 transition-colors ${isInfoOpen ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}
+            title="Information"
+          >
+            <i className="fa-solid fa-circle-info"></i>
+          </button>
+        </div>
+        {headerRight}
       </div>
       {infoContent}
       <div className="flex items-center gap-1">
@@ -62,28 +75,32 @@ export const DualNumberInput: React.FC<DualNumberInputProps> = ({
             max={max1}
             value={value1}
             onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
+              const parsed = parseFloat(e.target.value);
               const safeValue = Number.isNaN(parsed)
                 ? min1
                 : Math.max(min1, Math.min(max1, parsed));
               onValue1Change(safeValue);
             }}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              if (e.key === 'ArrowUp') {
                 e.preventDefault();
+                onIncrement1 ? onIncrement1() : onValue1Change(Math.min(max1, Math.floor(value1) + 1));
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                onDecrement1 ? onDecrement1() : onValue1Change(Math.max(min1, Math.ceil(value1) - 1));
               }
             }}
             className="w-full text-[10px] font-mono text-center border-0 outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
           <div className="flex flex-col -my-1">
             <button 
-              onClick={() => onValue1Change(Math.min(max1, value1 + 1))}
+              onClick={() => onIncrement1 ? onIncrement1() : onValue1Change(Math.min(max1, Math.floor(value1) + 1))}
               className="text-[8px] text-slate-500 hover:text-slate-700 leading-none h-2"
             >
               ▲
             </button>
             <button 
-              onClick={() => onValue1Change(Math.max(min1, value1 - 1))}
+              onClick={() => onDecrement1 ? onDecrement1() : onValue1Change(Math.max(min1, Math.ceil(value1) - 1))}
               className="text-[8px] text-slate-500 hover:text-slate-700 leading-none h-2"
             >
               ▼
@@ -99,15 +116,19 @@ export const DualNumberInput: React.FC<DualNumberInputProps> = ({
             value={value2}
             disabled={locked}
             onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
+              const parsed = parseFloat(e.target.value);
               const safeValue = Number.isNaN(parsed)
                 ? min2
                 : Math.max(min2, Math.min(max2, parsed));
               onValue2Change(safeValue);
             }}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              if (e.key === 'ArrowUp') {
                 e.preventDefault();
+                if (!locked) onIncrement2 ? onIncrement2() : onValue2Change(Math.min(max2, Math.floor(value2) + 1));
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (!locked) onDecrement2 ? onDecrement2() : onValue2Change(Math.max(min2, Math.ceil(value2) - 1));
               }
             }}
             className="w-full text-[10px] font-mono text-center border-0 outline-none bg-transparent disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -115,14 +136,14 @@ export const DualNumberInput: React.FC<DualNumberInputProps> = ({
           <div className="flex flex-col -my-1">
             <button 
               disabled={locked}
-              onClick={() => onValue2Change(Math.min(max2, value2 + 1))}
+              onClick={() => onIncrement2 ? onIncrement2() : onValue2Change(Math.min(max2, Math.floor(value2) + 1))}
               className="text-[8px] text-slate-500 hover:text-slate-700 leading-none h-2 disabled:opacity-30"
             >
               ▲
             </button>
             <button 
               disabled={locked}
-              onClick={() => onValue2Change(Math.max(min2, value2 - 1))}
+              onClick={() => onDecrement2 ? onDecrement2() : onValue2Change(Math.max(min2, Math.ceil(value2) - 1))}
               className="text-[8px] text-slate-500 hover:text-slate-700 leading-none h-2 disabled:opacity-30"
             >
               ▼

@@ -486,15 +486,19 @@ export const recolorSvg = (
     const lowerHex = hex.toLowerCase();
     
     // 1. Apply Palette Override
-    let currentHex = colorToTarget[lowerHex] || hex;
+    // If a manual override exists (or a synced tint override), use it directly.
+    // This prevents double-tinting since the override already contains the tinted color.
+    if (colorToTarget[lowerHex]) {
+      return colorToTarget[lowerHex];
+    }
     
     // 2. Apply Tint Override
     const groupInfo = colorToGroupInfo[lowerHex];
     if (groupInfo) {
-      return applyTintToHex(currentHex, groupInfo.baseHue, groupInfo.tint);
+      return applyTintToHex(hex, groupInfo.baseHue, groupInfo.tint);
     }
     
-    return currentHex;
+    return hex;
   };
 
   // Replace hex colors

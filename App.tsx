@@ -3,6 +3,7 @@ import { PaletteColor, ColorGroup, ColorInstance, PixelArtConfig, RecolorMode, T
 import {
   rgbToHex,
   hexToRgb,
+  hexToHsl,
   findClosestColor,
   extractColorGroups,
   extractSvgColors,
@@ -11,7 +12,8 @@ import {
   sigmoidSnap,
   applyMedianFilter,
   getColorDistance,
-  calculateGroupBaseHue
+  calculateGroupBaseHue,
+  applyTintToHex
 } from './utils/colorUtils';
 import { Header } from './components/Header';
 import { ControlPanel } from './components/ControlPanel';
@@ -42,6 +44,7 @@ const App: React.FC = () => {
   const [alphaSmoothness, setAlphaSmoothness] = useState<number>(0);
   const [hasTransparency, setHasTransparency] = useState<boolean>(false);
   const [preserveTransparency, setPreserveTransparency] = useState<boolean>(true);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number, height: number } | null>(null);
 
   // Pixel Art Mode State
   const [pixelArtConfig, setPixelArtConfig] = useState<PixelArtConfig>({
@@ -139,6 +142,7 @@ const App: React.FC = () => {
       const img = new Image();
       img.src = image;
       img.onload = () => {
+        setImageDimensions({ width: img.width, height: img.height });
         let drawWidth = img.width;
         let drawHeight = img.height;
 
@@ -607,9 +611,39 @@ const App: React.FC = () => {
     setProcessingState('processing');
     await new Promise(resolve => setTimeout(resolve, 50));
 
+    // Calculate effective color overrides from supergroup tints
+    const effectiveColorOverrides = { ...colorOverrides };
+    
+    supergroups.forEach(sg => {
+      if (sg.tint) {
+        sg.memberGroupIds.forEach(gid => {
+          // Only apply if there isn't already a manual override
+          if (!colorOverrides[gid]) {
+             const group = colorGroups.find(g => g.id === gid);
+             let baseHex = selectedInGroup[gid];
+             let baseHue = 0;
+
+             if (group) {
+                 baseHex = baseHex || group.representativeHex || '#000000';
+                 baseHue = group.baseHue ?? 0;
+             } else if (baseHex) {
+                 // Manual layer
+                 const hsl = hexToHsl(baseHex);
+                 baseHue = hsl ? hsl.h : 0;
+             }
+
+             if (baseHex) {
+                 const tintedHex = applyTintToHex(baseHex, baseHue, sg.tint!);
+                 effectiveColorOverrides[gid] = tintedHex;
+             }
+          }
+        });
+      }
+    });
+
     if (isSvg && svgContent) {
       try {
-        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, colorOverrides, tintOverrides);
+        const recoloredSvgContent = recolorSvg(svgContent, colorGroups, effectiveColorOverrides, tintOverrides);
         const blob = new Blob([recoloredSvgContent], { type: 'image/svg+xml' });
         setProcessedSize(blob.size);
         setProcessedBlob(blob);
@@ -626,12 +660,12 @@ const App: React.FC = () => {
     try {
       const imageBitmap = await createImageBitmap(img);
 
-      // Flatten supergroup tints into tintOverrides
-      const effectiveTintOverrides = { ...tintOverrides };
-      supergroups.forEach(sg => {
-        sg.memberGroupIds.forEach(gid => {
-          effectiveTintOverrides[gid] = sg.tint;
-        });
+      // Reconstruct palette with effective overrides
+      const effectivePalette = palette.map(p => {
+          if (effectiveColorOverrides[p.id]) {
+              return { ...p, targetHex: effectiveColorOverrides[p.id] };
+          }
+          return p;
       });
 
       workerRef.current.postMessage({
@@ -644,7 +678,7 @@ const App: React.FC = () => {
           disablePostProcessing,
           disableRecoloring,
           disableScaling,
-          palette,
+          palette: effectivePalette,
           colorGroups,
           enabledGroups: Array.from(enabledGroups),
           selectedInGroup,
@@ -653,7 +687,8 @@ const App: React.FC = () => {
           alphaSmoothness,
           preserveTransparency,
           pixelArtConfig,
-          tintOverrides: effectiveTintOverrides
+          recolorMode: 'tint',
+          tintOverrides: tintOverrides
         }
       }, [imageBitmap]);
     } catch (err) {
@@ -721,6 +756,7 @@ const App: React.FC = () => {
               preserveTransparency={preserveTransparency}
               setPreserveTransparency={setPreserveTransparency}
               image={image} onImageUpload={handleImageUpload}
+              imageDimensions={imageDimensions}
               colorGroups={colorGroups} manualLayerIds={manualLayerIds}
               selectedInGroup={selectedInGroup} enabledGroups={enabledGroups} setEnabledGroups={setEnabledGroups}
               colorOverrides={colorOverrides}
@@ -837,6 +873,24 @@ const App: React.FC = () => {
                   onChange={(settings) => {
                     if (settings) {
                       setSupergroups(prev => prev.map(sg => sg.id === tintModalGroupId ? { ...sg, tint: settings } : sg));
+                      
+                      // Also update color overrides for all members so the recolor box updates
+                      setColorOverrides(prev => {
+                        const next = { ...prev };
+                        supergroup.memberGroupIds.forEach(gid => {
+                          const group = colorGroups.find(g => g.id === gid);
+                          const baseHex = selectedInGroup[gid] || group?.representativeHex || group?.members[0]?.hex || '#000000';
+                          
+                          let baseHue = group?.baseHue ?? 0;
+                          if (!group) {
+                            const hsl = hexToHsl(baseHex);
+                            baseHue = hsl ? hsl.h : 0;
+                          }
+                          
+                          next[gid] = applyTintToHex(baseHex, baseHue, settings);
+                        });
+                        return next;
+                      });
                     } else {
                       // Handle removal of tint
                       setSupergroups(prev => prev.map(sg => {
@@ -846,6 +900,15 @@ const App: React.FC = () => {
                         }
                         return sg;
                       }));
+                      
+                      // Remove overrides for members
+                      setColorOverrides(prev => {
+                        const next = { ...prev };
+                        supergroup.memberGroupIds.forEach(gid => {
+                          delete next[gid];
+                        });
+                        return next;
+                      });
                     }
                   }}
                   onClose={() => setTintModalGroupId(null)}
@@ -861,8 +924,28 @@ const App: React.FC = () => {
                 onChange={(settings) => {
                   if (settings) {
                     setTintOverrides(prev => ({ ...prev, [tintModalGroupId]: settings }));
+                    
+                    // Also update color override so the recolor box updates
+                    const group = colorGroups.find(g => g.id === tintModalGroupId);
+                    const baseHex = selectedInGroup[tintModalGroupId] || group?.representativeHex || '#000000';
+                    
+                    let baseHue = group?.baseHue ?? 0;
+                    if (!group) {
+                      const hsl = hexToHsl(baseHex);
+                      baseHue = hsl ? hsl.h : 0;
+                    }
+                    
+                    const newColor = applyTintToHex(baseHex, baseHue, settings);
+                    setColorOverrides(prev => ({ ...prev, [tintModalGroupId]: newColor }));
                   } else {
                     setTintOverrides(prev => {
+                      const next = { ...prev };
+                      delete next[tintModalGroupId];
+                      return next;
+                    });
+                    
+                    // Remove override
+                    setColorOverrides(prev => {
                       const next = { ...prev };
                       delete next[tintModalGroupId];
                       return next;

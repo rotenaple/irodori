@@ -46,7 +46,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     if (e.data.type !== 'process') return;
     const totalStart = performance.now();
     const { imageBitmap, parameters } = e.data;
-    const { upscaleFactor, denoiseRadius, edgeProtection, vertexInertia, disablePostProcessing, disableRecoloring, disableScaling, palette, smoothingLevels, alphaSmoothness, preserveTransparency, recolorMode, tintOverrides } = parameters;
+    const { upscaleFactor, denoiseRadius, edgeProtection, vertexInertia, disablePostProcessing, disableRecoloring, disableScaling, palette, smoothingLevels, alphaSmoothness, preserveTransparency, recolorMode, tintOverrides, pixelArtConfig } = parameters;
 
     try {
         const nativeWidth = imageBitmap.width, nativeHeight = imageBitmap.height;
@@ -60,6 +60,116 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const nativeCanvas = new OffscreenCanvas(nativeWidth, nativeHeight);
         const nCtx = nativeCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
         nCtx!.drawImage(imageBitmap, 0, 0);
+
+        // --- PIXEL ART MODE ---
+        if (pixelArtConfig && pixelArtConfig.enabled) {
+            const blockW = Math.max(1, pixelArtConfig.pixelWidth);
+            const blockH = Math.max(1, pixelArtConfig.pixelHeight);
+            const offX = pixelArtConfig.offsetX || 0;
+            const offY = pixelArtConfig.offsetY || 0;
+
+            const processW = nativeWidth - offX;
+            const processH = nativeHeight - offY;
+            const targetW = Math.floor(processW / blockW);
+            const targetH = Math.floor(processH / blockH);
+            
+            if (targetW <= 0 || targetH <= 0) {
+                // Fallback if settings result in invalid size
+                self.postMessage({ type: 'complete', error: 'Pixel Art settings resulted in invalid image size.' });
+                return;
+            }
+
+            const pCanvas = new OffscreenCanvas(targetW, targetH);
+            const pCtx = pCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
+            pCtx!.imageSmoothingEnabled = false;
+            
+            // Draw only the aligned region
+            const sourceRegionW = targetW * blockW;
+            const sourceRegionH = targetH * blockH;
+            pCtx!.drawImage(nativeCanvas, offX, offY, sourceRegionW, sourceRegionH, 0, 0, targetW, targetH);
+
+            if (!disableRecoloring) {
+                const pData = pCtx!.getImageData(0, 0, targetW, targetH);
+                const pixels = pData.data;
+                const paletteSize = palette.length;
+                
+                // Prepare Palette & Cache
+                const pR = new Uint8Array(paletteSize), pG = new Uint8Array(paletteSize), pB = new Uint8Array(paletteSize);
+                const pTR = new Uint8Array(paletteSize), pTG = new Uint8Array(paletteSize), pTB = new Uint8Array(paletteSize);
+                const colorToIdxCache = new Map<number, number>();
+                const paletteIdMap = new Map<string, number>();
+                const isTint = recolorMode === 'tint' && tintOverrides;
+
+                for (let i = 0; i < paletteSize; i++) {
+                    const p = palette[i];
+                    pR[i] = p.r; pG[i] = p.g; pB[i] = p.b;
+                    paletteIdMap.set(p.id, i);
+                    colorToIdxCache.set(rgbToInt(p.r, p.g, p.b), i);
+
+                    // Target Color Calculation
+                    let tr = p.r, tg = p.g, tb = p.b;
+                    if (p.targetHex) {
+                        const trgb = hexToRgb(p.targetHex);
+                        if (trgb) { tr = trgb.r; tg = trgb.g; tb = trgb.b; }
+                    } else if (isTint && tintOverrides?.[p.id] !== undefined) {
+                        const group = parameters.colorGroups?.find(gr => gr.id === p.id);
+                        const tinted = applyTintRGB(p.r, p.g, p.b, group?.baseHue ?? 0, tintOverrides[p.id]);
+                        tr = tinted.r; tg = tinted.g; tb = tinted.b;
+                    }
+                    pTR[i] = tr; pTG[i] = tg; pTB[i] = tb;
+                }
+
+                if (parameters.colorGroups) {
+                    for (const g of parameters.colorGroups) {
+                        const pIdx = paletteIdMap.get(g.id);
+                        if (pIdx !== undefined) for (const m of g.members) {
+                            const rgb = hexToRgb(m.hex);
+                            if (rgb) colorToIdxCache.set(rgbToInt(rgb.r, rgb.g, rgb.b), pIdx);
+                        }
+                    }
+                }
+
+                // Apply Recoloring
+                for (let i = 0; i < pixels.length; i += 4) {
+                    if (pixels[i+3] === 0) continue; // Skip transparent
+                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                    const key = rgbToInt(r, g, b);
+                    let pIdx = colorToIdxCache.get(key);
+                    
+                    if (pIdx === undefined) {
+                        let minDistSq = Infinity;
+                        for (let j = 0; j < paletteSize; j++) {
+                            const dSq = (r - pR[j])**2 + (g - pG[j])**2 + (b - pB[j])**2;
+                            if (dSq < minDistSq) { minDistSq = dSq; pIdx = j; }
+                        }
+                        colorToIdxCache.set(key, pIdx!);
+                    }
+                    
+                    if (pIdx !== undefined) {
+                        pixels[i] = pTR[pIdx];
+                        pixels[i+1] = pTG[pIdx];
+                        pixels[i+2] = pTB[pIdx];
+                    }
+                }
+                pCtx!.putImageData(pData, 0, 0);
+            }
+            
+            // Integer Scaling to fit target output size
+            const maxW = nativeWidth * targetUpscale;
+            const maxH = nativeHeight * targetUpscale;
+            const scale = Math.max(1, Math.floor(Math.min(maxW / targetW, maxH / targetH)));
+            
+            const finalW = targetW * scale;
+            const finalH = targetH * scale;
+            
+            const fCanvas = new OffscreenCanvas(finalW, finalH);
+            const fCtx = fCanvas.getContext('2d');
+            fCtx!.imageSmoothingEnabled = false;
+            fCtx!.drawImage(pCanvas, 0, 0, finalW, finalH);
+
+            self.postMessage({ type: 'complete', result: await intelligentCompress(fCanvas, false) });
+            return;
+        }
 
         if (!disablePostProcessing && denoiseRadius > 0) {
             const dStart = performance.now();
@@ -212,13 +322,15 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         for (let i = 0; i < paletteSize; i++) {
             const p = palette[i];
             let r = p.r, g = p.g, b = p.b;
-            if (isTint && tintOverrides?.[p.id] !== undefined) {
+            
+            // Prioritize explicit targetHex (from manual override or synced tint)
+            if (p.targetHex) {
+                const trgb = hexToRgb(p.targetHex);
+                if (trgb) { r = trgb.r; g = trgb.g; b = trgb.b; }
+            } else if (isTint && tintOverrides?.[p.id] !== undefined) {
                 const group = parameters.colorGroups?.find(gr => gr.id === p.id);
                 const tinted = applyTintRGB(r, g, b, group?.baseHue ?? 0, tintOverrides[p.id]);
                 r = tinted.r; g = tinted.g; b = tinted.b;
-            } else if (p.targetHex) {
-                const trgb = hexToRgb(p.targetHex);
-                if (trgb) { r = trgb.r; g = trgb.g; b = trgb.b; }
             }
             pTR[i] = r; pTG[i] = g; pTB[i] = b;
         }
