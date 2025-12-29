@@ -127,8 +127,9 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
       const pW = parentRef.current.clientWidth;
       const pH = parentRef.current.clientHeight;
-      const availW = pW - (window.innerWidth >= 768 ? 32 : 0);
-      const availH = pH - (window.innerWidth >= 768 ? 32 : 0);
+      const isMobile = window.innerWidth < 768;
+      const availW = pW - (isMobile ? 0 : 32);
+      const availH = pH - (isMobile ? 0 : 32);
 
       const { width: imgW, height: imgH } = activeImageDims;
       if (!imgW || !imgH) return;
@@ -138,12 +139,19 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
       let renderW, renderH;
 
-      if (imgAspect > parentAspect) {
+      if (isMobile) {
+        // Mobile: Maximize width, let height grow (scroll)
         renderW = availW;
         renderH = availW / imgAspect;
       } else {
-        renderH = availH;
-        renderW = availH * imgAspect;
+        // Desktop: Contain within available space
+        if (imgAspect > parentAspect) {
+          renderW = availW;
+          renderH = availW / imgAspect;
+        } else {
+          renderH = availH;
+          renderW = availH * imgAspect;
+        }
       }
 
       setLayoutDims({ width: renderW, height: renderH });
@@ -351,7 +359,7 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
 
       <div
         ref={parentRef}
-        className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-hidden group flex items-center justify-center p-0 md:p-4 bg-dots"
+        className="relative flex-1 min-h-[150px] md:min-h-[400px] overflow-y-auto md:overflow-hidden group flex p-0 md:p-4 mb-16 bg-dots"
       >
         {!image ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center opacity-10">
@@ -359,10 +367,10 @@ export const ImageWorkspace: React.FC<ImageWorkspaceProps> = ({
             <h3 className="tracking-widest text-base uppercase font-bold">Waiting for source</h3>
           </div>
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
+          <div className="w-full min-h-full flex">
             <div
               ref={containerRef}
-              className="relative shadow-sm transition-all duration-75 ease-linear"
+              className="relative shadow-sm transition-all duration-75 ease-linear m-auto"
               style={{
                 width: layoutDims?.width,
                 height: layoutDims?.height

@@ -93,7 +93,7 @@ export const TintModal: React.FC<TintModalProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md md:max-w-2xl flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
+    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md sm:max-w-lg md:max-w-2xl flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
         <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Tint Settings</h3>
         <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-slate-100 hover:text-slate-600 transition-colors">
@@ -156,7 +156,7 @@ export const TintModal: React.FC<TintModalProps> = ({
               onMouseMove={(e) => e.buttons === 1 && handleCanvasInteract(e)}
               onTouchMove={handleCanvasInteract}
             />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-x-4">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
                 <input 
@@ -171,7 +171,7 @@ export const TintModal: React.FC<TintModalProps> = ({
                 <input 
                   type="range" min="0" max="100" step="1" value={hueForce}
                   onChange={(e) => setHueForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
+                  className="custom-slider flex-1"
                 />
                 <input 
                   type="number" min="0" max="100" value={hueForce}
@@ -185,13 +185,13 @@ export const TintModal: React.FC<TintModalProps> = ({
           {/* Saturation */}
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Saturation</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-x-4">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
                 <input 
                   type="range" min="-100" max="100" step="1" value={saturation}
                   onChange={(e) => setSaturation(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
+                  className="custom-slider flex-1"
                 />
                 <input 
                   type="number" min="-100" max="100" value={saturation}
@@ -204,7 +204,7 @@ export const TintModal: React.FC<TintModalProps> = ({
                 <input 
                   type="range" min="0" max="100" step="1" value={saturationForce}
                   onChange={(e) => setSaturationForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
+                  className="custom-slider flex-1"
                 />
                 <input 
                   type="number" min="0" max="100" value={saturationForce}
@@ -218,13 +218,13 @@ export const TintModal: React.FC<TintModalProps> = ({
           {/* Lightness */}
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase text-slate-600 tracking-wide">Lightness</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-x-4">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-500 w-12">Value</span>
                 <input 
                   type="range" min="-100" max="100" step="1" value={lightness}
                   onChange={(e) => setLightness(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
+                  className="custom-slider flex-1"
                 />
                 <input 
                   type="number" min="-100" max="100" value={lightness}
@@ -237,7 +237,7 @@ export const TintModal: React.FC<TintModalProps> = ({
                 <input 
                   type="range" min="0" max="100" step="1" value={lightnessForce}
                   onChange={(e) => setLightnessForce(parseInt(e.target.value))}
-                  className="flex-1 h-2 cursor-pointer rounded accent-slate-500"
+                  className="custom-slider flex-1"
                 />
                 <input 
                   type="number" min="0" max="100" value={lightnessForce}
