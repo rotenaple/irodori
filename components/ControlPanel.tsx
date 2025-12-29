@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ColorGroup, PixelArtConfig, RecolorMode, TintSettings } from '../types';
+import { ColorGroup, PixelArtConfig, RecolorMode, TintSettings, Supergroup } from '../types';
 import { DualNumberInput } from './DualNumberInput';
 import { hslToRgb, rgbToHex } from '../utils/colorUtils';
 
@@ -157,11 +157,13 @@ interface ControlPanelProps {
   onMobileViewToggle: (id: string, type: 'group' | 'color') => void;
   pixelArtConfig: PixelArtConfig;
   setPixelArtConfig: (v: PixelArtConfig | ((prev: PixelArtConfig) => PixelArtConfig)) => void;
-  recolorMode: RecolorMode;
-  setRecolorMode: (v: RecolorMode) => void;
+  // recolorMode: RecolorMode; // Removed
+  // setRecolorMode: (v: RecolorMode) => void; // Removed
   tintOverrides: Record<string, TintSettings>;
   setTintOverrides: React.Dispatch<React.SetStateAction<Record<string, TintSettings>>>;
   setTintModalGroupId: (id: string | null) => void;
+  supergroups: Supergroup[];
+  setSupergroups: React.Dispatch<React.SetStateAction<Supergroup[]>>;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -176,13 +178,46 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   disableScaling, setDisableScaling, disablePostProcessing, setDisablePostProcessing,
   disableRecoloring, setDisableRecoloring, isSvg, mobileViewTarget, onMobileViewToggle,
   pixelArtConfig, setPixelArtConfig,
-  recolorMode, setRecolorMode, tintOverrides, setTintOverrides, setTintModalGroupId
+  /* recolorMode, setRecolorMode, */ tintOverrides, setTintOverrides, setTintModalGroupId,
+  supergroups, setSupergroups
 }) => {
   const [activeInfos, setActiveInfos] = useState<Set<string>>(new Set());
   const [mobilePopup, setMobilePopup] = useState<{ groupId: string, colorHex: string, percent: string } | null>(null);
   const [expandedSubcolors, setExpandedSubcolors] = useState<Set<string>>(new Set());
   const [subcolorLimit, setSubcolorLimit] = useState(16);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const createSupergroup = (groupIds: string[]) => {
+    if (groupIds.length < 2) return;
+    const newSupergroup: Supergroup = {
+      id: `super-${Math.random().toString(36).substr(2, 9)}`,
+      label: `Group ${supergroups.length + 1}`,
+      memberGroupIds: groupIds,
+      // tint: undefined // Start with no tint
+    };
+    setSupergroups(prev => [...prev, newSupergroup]);
+  };
+
+  const ungroupFromSupergroup = (groupId: string) => {
+    setSupergroups(prev => {
+      const next = prev.map(sg => ({
+        ...sg,
+        memberGroupIds: sg.memberGroupIds.filter(id => id !== groupId)
+      })).filter(sg => sg.memberGroupIds.length >= 2); // Disband if < 2
+      return next;
+    });
+  };
+
+  const toggleGroupSelection = (id: string) => {
+    setEnabledGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const toggleInfo = (key: string) => {
     setActiveInfos(prev => {
@@ -216,8 +251,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     if (!panelRef.current) return;
     const calculateLimit = () => {
       if (!panelRef.current) return;
-      const availableWidth = panelRef.current.clientWidth - 52;
-      const itemsPerRow = Math.floor(availableWidth / 24);
+      // Account for padding (panel p-4=32px, group p-2=16px, subcolor pl-7=28px) -> ~76px
+      const availableWidth = panelRef.current.clientWidth - 50;
+      // Item width 12px + gap 2px = 14px
+      const itemsPerRow = Math.floor(availableWidth / 14);
       setSubcolorLimit(Math.max(12, itemsPerRow * 2));
     };
     calculateLimit();
@@ -233,13 +270,231 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         setMobilePopup(null);
       }
     };
-    document.addEventListener('click', handleClickOutside);
-    document.addEventListener('touchstart', handleClickOutside);
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-      document.removeEventListener('touchstart', handleClickOutside);
-    };
   }, [mobilePopup]);
+
+  const addToSupergroup = (supergroupId: string, groupId: string) => {
+    setSupergroups(prev => prev.map(sg => {
+      if (sg.id === supergroupId && !sg.memberGroupIds.includes(groupId)) {
+        return { ...sg, memberGroupIds: [...sg.memberGroupIds, groupId] };
+      }
+      return sg;
+    }));
+  };
+
+  const renderGroupItem = (group: any, isSupergroupMember = false) => {
+    const isSelected = enabledGroups.has(group.id);
+    const isHovered = hoveredGroupId === group.id;
+    const isManual = group.isManual;
+    const mainColor = isManual ? '#ffffff' : (group.representativeHex || '#000000');
+    const overrideColor = colorOverrides[group.id];
+    const displayColor = overrideColor || mainColor;
+    const isDragOver = dragOverGroupId === group.id;
+    const isBeingDragged = draggedItem?.type === 'group' && draggedItem.groupId === group.id;
+    
+    return (
+      <div
+        key={group.id}
+        className={`
+          group relative flex flex-col gap-1 p-2 rounded-lg border transition-all duration-200
+          ${isSelected 
+            ? 'bg-blue-50/50 border-blue-200 shadow-sm' 
+            : isHovered
+              ? 'bg-white border-gray-300 shadow-sm'
+              : 'bg-gray-50/50 border-gray-200 hover:border-gray-300'
+          }
+          ${isSupergroupMember ? 'ml-0' : ''}
+          ${isBeingDragged ? 'opacity-50' : ''}
+        `}
+        onMouseEnter={() => setHoveredGroupId(group.id)}
+        onMouseLeave={() => setHoveredGroupId(null)}
+        draggable={true}
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', group.id);
+          e.dataTransfer.effectAllowed = 'move';
+          setDraggedItem({ type: 'group', groupId: group.id });
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (draggedItem?.type === 'group' && draggedItem.groupId !== group.id) {
+            setDragOverGroupId(group.id);
+          }
+        }}
+        onDragLeave={() => setDragOverGroupId(null)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOverGroupId(null);
+          // Drop logic is handled by the specific drop zones below
+        }}
+      >
+        {/* Drag Overlay for Merge/Group */}
+        {isDragOver && draggedItem?.type === 'group' && draggedItem.groupId !== group.id && (
+          <div className="absolute inset-0 z-20 flex flex-col rounded-lg overflow-hidden bg-white/90 backdrop-blur-sm border-2 border-blue-400 shadow-lg">
+            <div 
+              className="flex-1 flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer border-b border-blue-200"
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (draggedItem.type === 'group') {
+                  onMergeGroups(draggedItem.groupId, group.id);
+                  setDraggedItem(null);
+                  setDragOverGroupId(null);
+                }
+              }}
+            >
+              <i className="fa-solid fa-object-group text-blue-600"></i>
+              <span className="text-[10px] font-bold uppercase text-blue-700">Merge</span>
+            </div>
+            {!isSupergroupMember && (
+              <div 
+                className="flex-1 flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 transition-colors cursor-pointer"
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (draggedItem.type === 'group') {
+                    createSupergroup([draggedItem.groupId, group.id]);
+                    setDraggedItem(null);
+                    setDragOverGroupId(null);
+                  }
+                }}
+              >
+                <i className="fa-solid fa-layer-group text-indigo-600"></i>
+                <span className="text-[10px] font-bold uppercase text-indigo-700">Group</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Group Header */}
+        <div className="flex items-center gap-2 mb-1">
+          {/* Selection Checkbox */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleGroupSelection(group.id);
+            }}
+            className={`
+              w-5 h-5 rounded border flex items-center justify-center transition-colors flex-shrink-0
+              ${isSelected 
+                ? 'bg-blue-500 border-blue-500 text-white' 
+                : 'bg-white border-gray-300 hover:border-blue-400 text-transparent'
+              }
+            `}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+
+          {/* Canonical Color Bar */}
+          <button 
+            onClick={() => onEditTarget(group.id, 'original')}
+            className={`
+              flex-1 h-8 rounded-md shadow-sm border border-black/5 relative overflow-hidden group/bar
+              transition-transform active:scale-[0.99]
+              ${isManual ? 'bg-transparent border-dashed border-gray-400' : ''}
+            `}
+            style={!isManual || (isManual && selectedInGroup[group.id]) ? { backgroundColor: isManual ? selectedInGroup[group.id] : mainColor } : undefined}
+            title="Set Canonical Color (Source)"
+          >
+              <div className="absolute inset-0 flex items-center justify-between px-2">
+                <span className="font-mono text-[10px] font-bold text-white/90 drop-shadow-md uppercase">
+                  {isManual ? 'Manual' : mainColor}
+                </span>
+                
+                {!isManual && totalSamples > 0 && (
+                  <span className="bg-black/20 backdrop-blur-[1px] text-white text-[9px] font-medium px-1.5 py-0.5 rounded-full">
+                    {((group.totalCount / totalSamples) * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+          </button>
+
+          {/* Arrow */}
+          <i className="fa-solid fa-chevron-right text-slate-300 text-[10px]"></i>
+
+          {/* Recolor Button (Target) */}
+          <button
+            onClick={() => onEditTarget(group.id, 'recolor')}
+            className={`
+              w-8 h-8 rounded-md flex items-center justify-center transition-all active:scale-95 shadow-sm border border-black/5
+              ${overrideColor ? 'ring-2 ring-offset-1 ring-blue-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-400 hover:text-slate-600'}
+            `}
+            style={overrideColor ? { backgroundColor: overrideColor } : undefined}
+            title={overrideColor ? `Override: ${overrideColor}\nClick to change` : "Set Recolor Override"}
+          >
+            {!overrideColor && <i className="fa-solid fa-eye-dropper text-xs"></i>}
+            {overrideColor && (
+                <span className="font-mono text-[9px] font-bold text-white/90 drop-shadow-md uppercase">
+                  {overrideColor.replace('#', '')}
+                </span>
+            )}
+          </button>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {isSupergroupMember && (
+              <button
+                onClick={() => ungroupFromSupergroup(group.id)}
+                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                title="Remove from Supergroup"
+              >
+                <i className="fa-solid fa-arrow-right-from-bracket text-[10px]"></i>
+              </button>
+            )}
+            {isManual && (
+              <button
+                onClick={() => onRemoveManualLayer(group.id)}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                title="Delete Manual Group"
+              >
+                <i className="fa-solid fa-trash text-[10px]"></i>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Color Swatches */}
+        {!isManual && group.members && group.members.length > 0 && (
+          <div className="pl-7">
+            <div className="flex flex-wrap gap-0.5">
+              {group.members.slice(0, expandedSubcolors.has(group.id) ? undefined : subcolorLimit).map((member: any) => (
+                <div
+                  key={member.hex}
+                  className="w-3 h-3 rounded-full border border-black/5 shadow-sm cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                  style={{ backgroundColor: member.hex }}
+                  title={`${member.hex} (${member.count} pixels)\nDrag to ungroup`}
+                  draggable={true}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', member.hex);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDraggedItem({ type: 'color', colorHex: member.hex, groupId: group.id });
+                    e.stopPropagation();
+                  }}
+                />
+              ))}
+            </div>
+            {group.members.length > subcolorLimit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSubcolorExpansion(group.id);
+                }}
+                className="text-[9px] font-bold text-slate-400 hover:text-slate-600 mt-1 flex items-center gap-1"
+              >
+                {expandedSubcolors.has(group.id) ? (
+                  <><i className="fa-solid fa-chevron-up"></i> Show Less</>
+                ) : (
+                  <><i className="fa-solid fa-chevron-down"></i> See All ({group.members.length - 14} more)</>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const cleanupControls = [
     { label: 'Remove Noise', val: denoiseRadius, set: setDenoiseRadius, max: 3, step: 1, info: 'denoise', desc: 'Removes grain and compression artifacts.' },
@@ -530,45 +785,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         />
 
         <div className={`transition-opacity ${disableRecoloring ? 'opacity-40 pointer-events-none' : ''}`}>
-          {/* Mode Switcher */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between text-[10px] font-bold text-[#333] uppercase tracking-wide mb-1.5">
-              <div className="flex items-center gap-2">
-                <span>Recolor Mode</span>
-                <button
-                  onClick={() => toggleInfo('recolormode')}
-                  className={`px-1 transition-colors ${activeInfos.has('recolormode') ? 'text-[#33569a]' : 'text-[#33569a]/70 hover:text-[#33569a]'}`}
-                >
-                  <i className="fa-solid fa-circle-info"></i>
-                </button>
-              </div>
-            </div>
-            <ExpandableInfoBox isOpen={activeInfos.has('recolormode')}>
-              <strong>Palette:</strong> Replace each color group with a specific target color.<br />
-              <strong>Hue Tint:</strong> Shift all colors in a group to a new hue while preserving their original lightness and saturation variations.
-            </ExpandableInfoBox>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                onClick={() => setRecolorMode('palette')}
-                className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${recolorMode === 'palette'
-                  ? 'bg-[#333] text-white border-[#333] shadow-md'
-                  : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
-              >
-                <i className="fa-solid fa-palette mr-1"></i> Palette
-              </button>
-              <button
-                onClick={() => setRecolorMode('tint')}
-                className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${recolorMode === 'tint'
-                  ? 'bg-[#333] text-white border-[#333] shadow-md'
-                  : 'bg-white text-[#333] border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
-              >
-                <i className="fa-solid fa-droplet mr-1"></i> Hue Tint
-              </button>
-            </div>
-          </div>
-
           <div className="mb-2">
             <SliderControl
               label="Color Grouping"
@@ -584,130 +800,82 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             />
           </div>
           <p className="text-[10px] text-slate-500 leading-tight">
-            {recolorMode === 'palette'
-              ? 'Choose which colors to keep. Ungroup colors to separate them, or drag onto another group to merge.'
-              : 'Adjust the hue slider to shift all colors in a group while preserving their lightness/saturation.'}
+            Drag groups onto each other to merge or create supergroups. Drag colors between groups to reorganize.
           </p>
         </div>
       </div>
 
       {/* 7. Color Groups List */}
-      <div className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      <div 
+        className={`flex flex-col gap-1 pr-1 transition-opacity duration-300 ${disableRecoloring ? 'opacity-40 pointer-events-none grayscale' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (draggedItem?.type === 'group') {
+            ungroupFromSupergroup(draggedItem.groupId);
+            setDraggedItem(null);
+          }
+        }}
+      >
         {!image && <p className="text-[10px] italic text-slate-400 text-center py-4 uppercase tracking-widest border border-dashed border-slate-200 rounded-xl">Import to extract colors</p>}
-        {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].map(item => {
-          const id = (item as any).id;
-          const isManual = (item as any).isManual;
-          const isEnabled = enabledGroups.has(id);
-          const group = item as ColorGroup;
-          const currentOriginal = selectedInGroup[id] || group.members?.[0]?.hex || '#ffffff';
-          const targetRecolor = colorOverrides[id];
-          const members = group.members || [];
-          const groupPercent = totalSamples > 0 ? ((group.totalCount / totalSamples) * 100).toFixed(1) : '0';
-          const isDropTarget = draggedItem && draggedItem.groupId !== id;
-          const isGroupViewActive = mobileViewTarget?.id === id && mobileViewTarget?.type === 'group';
-          const isSubcolorsExpanded = expandedSubcolors.has(id);
-          const currentTint = tintOverrides[id];
-          const hasTintOverride = currentTint !== undefined;
-          // Compute preview color for tint swatch
-
-          const tintPreviewHex = hasTintOverride
-            ? (() => {
-              const s = Math.max(0, Math.min(100, 70 + (currentTint.saturation || 0) * 0.3));
-              const l = Math.max(0, Math.min(100, 50 + (currentTint.lightness || 0) * 0.5));
-              const rgb = hslToRgb(currentTint.hue, s, l);
-              return rgbToHex(rgb.r, rgb.g, rgb.b);
-            })()
-            : null;
-          const sortedMembers = [...members].sort((a, b) => b.count - a.count);
-          const visibleMembers = isSubcolorsExpanded ? sortedMembers : sortedMembers.slice(0, subcolorLimit);
-          const hiddenCount = sortedMembers.length - subcolorLimit;
+        {/* Supergroups */}
+        {supergroups.map(sg => {
+          const tintPreviewHex = sg.tint ? (() => {
+            const s = Math.max(0, Math.min(100, 70 + (sg.tint.saturation || 0) * 0.3));
+            const l = Math.max(0, Math.min(100, 50 + (sg.tint.lightness || 0) * 0.5));
+            const rgb = hslToRgb(sg.tint.hue, s, l);
+            return rgbToHex(rgb.r, rgb.g, rgb.b);
+          })() : null;
 
           return (
-            <div key={id} className={`p-1 rounded-xl border flex flex-col gap-1 transition-all group/row ${isEnabled ? 'bg-white border-[#333]/10 shadow-sm' : 'bg-slate-50 border-transparent opacity-50 hover:opacity-80'} ${isDropTarget ? 'ring-2 ring-[#33569a] bg-[#33569a]/5' : ''} ${isGroupViewActive ? 'ring-2 ring-[#33569a]/50 bg-blue-50' : ''}`}
-              onDragOver={(e) => { if (draggedItem && draggedItem.groupId !== id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
-              onDrop={(e) => { e.preventDefault(); if (!draggedItem) return; if (draggedItem.type === 'color' && draggedItem.colorHex) onMoveColor(draggedItem.colorHex, draggedItem.groupId, id); else if (draggedItem.type === 'group') onMergeGroups(draggedItem.groupId, id); setDraggedItem(null); }}
-            >
-              <div
-                className="flex items-center gap-2 cursor-move"
-                draggable
-                onDragStart={(e) => { setDraggedItem({ type: 'group', groupId: id }); e.dataTransfer.effectAllowed = 'move'; }}
-                onDragEnd={() => setDraggedItem(null)}
-                onMouseEnter={() => setHoveredGroupId(id)}
-                onMouseLeave={() => setHoveredGroupId(null)}
-              >
-                <input type="checkbox" checked={isEnabled} onChange={() => { setEnabledGroups(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; }); }} className="w-3 h-3 rounded border-slate-300 accent-[#333] cursor-pointer shrink-0" />
-                <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
-                  <button onClick={() => onEditTarget(id, 'original')} className={`h-6 rounded-lg border border-black/5 shadow-inner relative group/btn overflow-hidden transition-transform active:scale-[0.98] flex-1`} style={{ backgroundColor: currentOriginal }} title={`Group Area:${groupPercent}% - Click to change anchor color`}>
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/btn:opacity-100 bg-black/10 transition-opacity"><span className="text-[8px] font-mono font-bold text-white drop-shadow-md bg-black/30 px-1 py-0.5 rounded backdrop-blur-[1px]">{currentOriginal.toUpperCase()}</span></div>
-                    <div className="absolute top-0 right-0 px-1 text-[7px] font-bold text-black/40 bg-white/40 rounded-bl-md backdrop-blur-[1px]">{groupPercent}%</div>
-                  </button>
-                  <i className="fa-solid fa-chevron-right text-[9px] text-slate-300 shrink-0"></i>
-                  {recolorMode === 'palette' && (
-                    <button onClick={() => onEditTarget(id, 'recolor')} className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] ${targetRecolor ? 'border-[#333]/20 shadow-sm' : 'border-dashed border-slate-300 hover:border-slate-400 bg-slate-50'}`} style={{ backgroundColor: targetRecolor || 'transparent' }} title="Target Color (Optional)">{!targetRecolor && <i className="fa-solid fa-eye-dropper text-[9px] text-slate-300"></i>}</button>
-                  )}
-                  {recolorMode === 'tint' && (
-                    <button
-                      onClick={() => setTintModalGroupId(id)}
-                      className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] ${hasTintOverride ? 'border-[#333]/20 shadow-sm' : 'border-dashed border-slate-300 hover:border-slate-400 bg-slate-50'}`}
-                      style={{ backgroundColor: tintPreviewHex || 'transparent' }}
-                      title={hasTintOverride ? `Tint: ${currentTint.hue}° (click to edit)` : 'Click to add tint'}
-                    >
-                      {!hasTintOverride && <i className="fa-solid fa-droplet text-[9px] text-slate-300"></i>}
-                    </button>
-                  )}
-                </div>
-                <button onClick={(e) => { if (isTouchDevice) { e.stopPropagation(); onMobileViewToggle(id, 'group'); } else { setHoveredGroupId(hoveredGroupId === id ? null : id); } }} className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors shrink-0 ${(hoveredGroupId === id || isGroupViewActive) ? 'bg-[#33569a] text-white' : 'text-slate-300 hover:text-[#33569a] hover:bg-[#33569a]/10'}`} title="View in Image"><i className="fa-solid fa-eye text-[9px]"></i></button>
-                {isTouchDevice && (
-                  <button onClick={(e) => { e.stopPropagation(); if (draggedItem && draggedItem.groupId !== id) { if (draggedItem.type === 'group') onMergeGroups(draggedItem.groupId, id); else if (draggedItem.colorHex) onMoveColor(draggedItem.colorHex, draggedItem.groupId, id); setDraggedItem(null); } else if (draggedItem?.groupId === id) setDraggedItem(null); else setDraggedItem({ type: 'group', groupId: id }); }} className={`w-5 h-5 flex items-center justify-center rounded-full transition-all shrink-0 ${draggedItem?.groupId === id ? 'bg-[#33569a] text-white scale-110' : draggedItem && draggedItem.groupId !== id ? 'bg-[#33569a]/10 text-[#33569a] ring-2 ring-[#33569a]/30' : 'text-slate-300 active:text-[#33569a]'}`} title={draggedItem?.groupId === id ? 'Tap to deselect' : draggedItem ? 'Tap to merge here' : 'Tap to select for moving'}><i className={`fa-solid ${draggedItem?.groupId === id ? 'fa-check' : draggedItem ? 'fa-arrow-down' : 'fa-grip-vertical'} text-[9px]`}></i></button>
-                )}
-                {isManual && <button onClick={() => onRemoveManualLayer(id)} className="w-5 h-5 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors shrink-0"><i className="fa-solid fa-times text-[9px]"></i></button>}
+            <div key={sg.id} className="border rounded-xl p-1 bg-slate-50/50 mb-1 border-slate-200">
+              <div className="flex items-center gap-2 mb-1 px-1">
+                <div className="flex-1 text-[10px] font-bold uppercase text-slate-400 tracking-widest">Supergroup</div>
+                <button
+                  onClick={() => setTintModalGroupId(sg.id)}
+                  className={`w-6 h-6 rounded-lg border shrink-0 transition-all flex items-center justify-center active:scale-[0.98] shadow-sm ${tintPreviewHex ? 'border-[#333]/20' : 'bg-slate-100 border-slate-200'}`}
+                  style={{ backgroundColor: tintPreviewHex || 'transparent' }}
+                  title={tintPreviewHex ? `Supergroup Tint: ${sg.tint!.hue}°` : "Set Supergroup Tint"}
+                >
+                  <i className={`fa-solid fa-droplet text-[9px] ${tintPreviewHex ? 'text-white drop-shadow-md' : 'text-slate-300'}`}></i>
+                </button>
               </div>
-              {/* Tint info badge - click to edit */}
-              {/* Tint info badge removed for consistency with palette mode */}
-              {
-                members.length > 1 && (
-                  <div className="flex flex-col gap-2 px-5 pb-1 relative">
-                    <div className="flex flex-wrap gap-1">
-                      {visibleMembers.map(member => {
-                        const memberPercent = totalSamples > 0 ? ((member.count / totalSamples) * 100).toFixed(1) : '0';
-                        const isPopupOpen = mobilePopup?.colorHex === member.hex && mobilePopup?.groupId === id;
-                        const isSubcolorActive = mobileViewTarget?.id === member.hex && mobileViewTarget?.type === 'color';
-                        return (
-                          <div key={member.hex} className="relative">
-                            <button draggable={!isTouchDevice} onDragStart={(e) => { setDraggedItem({ type: 'color', colorHex: member.hex, groupId: id }); e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); }} onDragEnd={() => setDraggedItem(null)} onClick={(e) => { e.stopPropagation(); if (isTouchDevice) setMobilePopup(isPopupOpen ? null : { groupId: id, colorHex: member.hex, percent: memberPercent }); else onMoveColor(member.hex, id, 'new'); }} onMouseEnter={() => !isTouchDevice && setHoveredColor(member.hex)} onMouseLeave={() => !isTouchDevice && setHoveredColor(null)} className={`subcolor-btn w-5 h-5 rounded-full border-2 transition-all hover:scale-110 active:scale-95 relative group/member ${isPopupOpen || isSubcolorActive ? 'border-[#33569a] ring-2 ring-[#33569a]/30' : 'border-black/10 hover:border-[#33569a]'} ${isTouchDevice ? 'cursor-pointer' : 'cursor-move'}`} style={{ backgroundColor: member.hex }} title={`${member.hex} (${memberPercent}%)`}>
-                              {isSubcolorActive && <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-full animate-in zoom-in duration-200"><i className="fa-solid fa-check text-[8px] text-white drop-shadow-md"></i></div>}
-                              {!isTouchDevice && <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/member:opacity-100 transition-opacity bg-black/20 rounded-full"><i className="fa-solid fa-grip-vertical text-[6px] text-white drop-shadow-md"></i></div>}
-                            </button>
-                            {isPopupOpen && (
-                              <div className="mobile-color-popup absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 min-w-[120px]">
-                                <div className="text-center mb-2"><div className="w-8 h-8 rounded-full mx-auto border-2 border-black/10 shadow-inner" style={{ backgroundColor: member.hex }}></div><div className="text-[9px] font-mono font-bold text-[#333] mt-1">{member.hex.toUpperCase()}</div><div className="text-[8px] text-slate-400">{memberPercent}%</div></div>
-                                <div className="flex flex-col gap-1">
-                                  <button onClick={() => { onMobileViewToggle(member.hex, 'color'); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"><i className="fa-solid fa-eye text-[#33569a]"></i><span>View in Image</span></button>
-                                  <button onClick={() => { onMoveColor(member.hex, id, 'new'); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-[9px] font-bold text-[#333] transition-colors"><i className="fa-solid fa-arrow-up-right-from-square text-[#33569a]"></i><span>Ungroup Color</span></button>
-                                  <div className="border-t border-slate-100 pt-1 mt-1"><div className="text-[7px] uppercase text-slate-400 font-bold mb-1 px-2">Move to group</div>
-                                    {colorGroups.filter(g => g.id !== id).slice(0, 4).map((target) => (
-                                      <button key={target.id} onClick={() => { onMoveColor(member.hex, id, target.id); setMobilePopup(null); }} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded text-left w-full">
-                                        <div className="w-3 h-3 rounded-full border border-black/5" style={{ backgroundColor: selectedInGroup[target.id] || target.members[0]?.hex }} />
-                                        <span className="text-[8px] text-slate-600 truncate">Group {colorGroups.findIndex(g => g.id === target.id) + 1}</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full"><div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-white"></div></div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {hiddenCount > 0 && !isSubcolorsExpanded && <button onClick={(e) => { e.stopPropagation(); toggleSubcolorExpansion(id); }} className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"><i className="fa-solid fa-angle-down"></i> Show {hiddenCount} More</button>}
-                    {isSubcolorsExpanded && sortedMembers.length > subcolorLimit && <button onClick={(e) => { e.stopPropagation(); toggleSubcolorExpansion(id); }} className="w-full py-1 text-[9px] font-bold text-slate-400 hover:text-[#33569a] bg-slate-50 hover:bg-slate-100 rounded transition-colors flex items-center justify-center gap-1"><i className="fa-solid fa-angle-up"></i> Show Less</button>}
-                  </div>
-                )
-              }
+              <div className="pl-2 border-l-2 border-slate-200 flex flex-col gap-1">
+                {sg.memberGroupIds.map(gid => {
+                  const group = colorGroups.find(g => g.id === gid);
+                  if (!group) return null;
+                  return renderGroupItem(group, true);
+                })}
+                {/* Drop Zone for Adding to Supergroup */}
+                <div 
+                  className={`
+                    h-8 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/50 
+                    flex items-center justify-center gap-2 text-indigo-400 font-bold text-[10px] uppercase tracking-wide
+                    transition-all
+                    ${draggedItem?.type === 'group' && !sg.memberGroupIds.includes(draggedItem.groupId) ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden py-0 border-0'}
+                  `}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // Stop propagation to prevent parent drop zones from firing
+                    if (draggedItem?.type === 'group') {
+                      addToSupergroup(sg.id, draggedItem.groupId);
+                      setDraggedItem(null);
+                    }
+                  }}
+                >
+                  <i className="fa-solid fa-plus"></i> Add Group
+                </div>
+              </div>
             </div>
           );
         })}
+
+        {/* Standalone Groups */}
+        {[...colorGroups, ...manualLayerIds.map(id => ({ id, isManual: true }))].filter(item => !supergroups.some(sg => sg.memberGroupIds.includes((item as any).id))).map(item => renderGroupItem(item))}
         {draggedItem && draggedItem.type === 'color' && (
           <div className="p-3 rounded-xl border-2 border-dashed border-[#33569a] bg-[#33569a]/5 flex items-center justify-center gap-2 text-[#33569a] font-bold text-[10px] uppercase tracking-wide transition-all hover:bg-[#33569a]/10" onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={(e) => { e.preventDefault(); if (!draggedItem) return; if (draggedItem.type === 'color' && draggedItem.colorHex) { onMoveColor(draggedItem.colorHex, draggedItem.groupId, 'new'); } setDraggedItem(null); }}>
             <i className="fa-solid fa-plus-circle"></i><span>Drop here to create new group</span>
