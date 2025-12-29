@@ -55,7 +55,7 @@ const App: React.FC = () => {
     showGrid: true,
     offsetX: 0,
     offsetY: 0,
-    lockOffset: false
+    lockOffset: true
   });
 
   // Recolor Mode State

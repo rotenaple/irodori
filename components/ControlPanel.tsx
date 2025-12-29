@@ -869,25 +869,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     };
                   });
                 } : undefined}
-                onDecrement2={pixelSizeMode === 'resolution' ? () => {
-                  if (!imageDimensions) return;
-                  const currentRes = imageDimensions.height / pixelArtConfig.pixelHeight;
-                  const targetRes = Math.round(currentRes) + 1;
-                  const newVal = Math.min(maxPixelSize, Math.max(1, imageDimensions.height / targetRes));
-                  setPixelArtConfig(prev => {
-                    const newPixelHeight = newVal;
-                    const newPixelWidth = prev.lockAspect ? newVal : prev.pixelWidth;
-                    const maxOffsetX = Math.max(0, newPixelWidth - 1);
-                    const maxOffsetY = Math.max(0, newPixelHeight - 1);
-                    return {
-                      ...prev,
-                      pixelWidth: newPixelWidth,
-                      pixelHeight: newPixelHeight,
-                      offsetX: Math.min(prev.offsetX, maxOffsetX),
-                      offsetY: Math.min(prev.offsetY, maxOffsetY),
-                    };
-                  });
-                } : undefined}
+
                 onLockToggle={() => setPixelArtConfig(prev => {
                   const newLockAspect = !prev.lockAspect;
                   const newPixelWidth = prev.pixelWidth;
