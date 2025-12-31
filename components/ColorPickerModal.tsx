@@ -13,10 +13,34 @@ interface ColorPickerModalProps {
   showNoneOption?: boolean;
 }
 
+// Attempt perceptual hue correction: stretch blue/magenta, compress green
+// Maps perceptual position (0-1) to actual hue (0-360)
+const perceptualToHue = (t: number): number => {
+  // Piecewise linear mapping to give more space to blue/magenta regions
+  // and slightly less to the dominant green region
+  if (t < 0.15) return t / 0.15 * 45;           // 0-45 (red-orange-yellow)
+  if (t < 0.30) return 45 + (t - 0.15) / 0.15 * 30;  // 45-75 (yellow-lime)
+  if (t < 0.45) return 75 + (t - 0.30) / 0.15 * 75;  // 75-150 (green range - compressed)
+  if (t < 0.60) return 150 + (t - 0.45) / 0.15 * 50; // 150-200 (cyan)
+  if (t < 0.80) return 200 + (t - 0.60) / 0.20 * 80; // 200-280 (blue-purple - stretched)
+  return 280 + (t - 0.80) / 0.20 * 80;               // 280-360 (magenta-red)
+};
+
+// Inverse: maps hue (0-360) to perceptual position (0-1)
+const hueToPerceptual = (h: number): number => {
+  if (h < 45) return (h / 45) * 0.15;
+  if (h < 75) return 0.15 + ((h - 45) / 30) * 0.15;
+  if (h < 150) return 0.30 + ((h - 75) / 75) * 0.15;
+  if (h < 200) return 0.45 + ((h - 150) / 50) * 0.15;
+  if (h < 280) return 0.60 + ((h - 200) / 80) * 0.20;
+  return 0.80 + ((h - 280) / 80) * 0.20;
+};
+
 export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
   currentHex, onChange, onClose, title, mode, suggestions = [], showNoneOption = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const satCanvasRef = useRef<HTMLCanvasElement>(null);
   const [paletteTab, setPaletteTab] = useState<'classic' | 'bright'>('classic');
   const [colorMode, setColorMode] = useState<'rgb' | 'hsl'>('rgb');
   const [rgbValues, setRgbValues] = useState({ r: 0, g: 0, b: 0 });
@@ -29,6 +53,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
     setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
   }, [currentHex]);
 
+  // Draw main Hue x Lightness canvas with perceptual hue correction
   useEffect(() => {
     if (mode !== 'spectrum') return;
     const canvas = canvasRef.current;
@@ -38,15 +63,52 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
 
     const { width, height } = canvas;
     for (let x = 0; x < width; x++) {
-      const hue = (x / width) * 360;
+      const t = x / width;
+      const hue = perceptualToHue(t);
+      const sat = hslValues.s; // Use current saturation
       const grad = ctx.createLinearGradient(0, 0, 0, height);
-      grad.addColorStop(0, `hsl(${hue}, 100%, 85%)`);
-      grad.addColorStop(0.5, `hsl(${hue}, 100%, 50%)`);
-      grad.addColorStop(1, `hsl(${hue}, 100%, 15%)`);
+      // Asymmetric curve: compress whites harder, blacks moderately
+      const steps = 20;
+      const gammaLight = 0.7; // smoother white transition
+      const gammaDark = 0.5;  // compress blacks harder
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps; // 0 to 1 (top to bottom)
+        let l: number;
+        if (t <= 0.5) {
+          // Top half: white to mid (L=100 to L=50)
+          l = 100 - 50 * Math.pow(t * 2, gammaLight);
+        } else {
+          // Bottom half: mid to black (L=50 to L=0)
+          l = 50 * Math.pow((1 - t) * 2, gammaDark);
+        }
+        grad.addColorStop(t, `hsl(${hue}, ${sat}%, ${l}%)`);
+      }
       ctx.fillStyle = grad;
       ctx.fillRect(x, 0, 1, height);
     }
-  }, [mode]);
+  }, [mode, hslValues.s]);
+
+  // Draw Saturation slider canvas with perceptual scaling
+  useEffect(() => {
+    if (mode !== 'spectrum') return;
+    const canvas = satCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const { width, height } = canvas;
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    // Power curve to compress greys (low sat) into bottom, stretch colorful range
+    const gammaSat = 0.5;
+    const steps = 20;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps; // 0 to 1 (top to bottom)
+      const s = 100 * Math.pow(1 - t, gammaSat); // top=100%, bottom=0%
+      grad.addColorStop(t, `hsl(${hslValues.h}, ${s}%, ${hslValues.l}%)`);
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+  }, [mode, hslValues.h, hslValues.l]);
 
   const handleInteract = (e: React.MouseEvent | React.TouchEvent) => {
     if (mode !== 'spectrum') return;
@@ -55,15 +117,40 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
     const rect = canvas.getBoundingClientRect();
     const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY;
-    const x = Math.max(0, Math.min(canvas.width - 1, ((clientX - rect.left) / rect.width) * canvas.width));
-    const y = Math.max(0, Math.min(canvas.height - 1, ((clientY - rect.top) / rect.height) * canvas.height));
+    const xRatio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const yRatio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
 
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    const rgb = { r: pixel[0], g: pixel[1], b: pixel[2] };
+    const newH = perceptualToHue(xRatio);
+    // Asymmetric curve: smoother whites, compress blacks harder
+    const gammaLight = 0.7;
+    const gammaDark = 0.5;
+    let newL: number;
+    if (yRatio <= 0.5) {
+      newL = 100 - 50 * Math.pow(yRatio * 2, gammaLight);
+    } else {
+      newL = 50 * Math.pow((1 - yRatio) * 2, gammaDark);
+    }
+    const newHsl = { h: newH, s: hslValues.s, l: newL };
+    setHslValues(newHsl);
+    const rgb = hslToRgb(newHsl.h, newHsl.s, newHsl.l);
     setRgbValues(rgb);
-    setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
+  };
+
+  const handleSatInteract = (e: React.MouseEvent | React.TouchEvent) => {
+    if (mode !== 'spectrum') return;
+    const canvas = satCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientY = 'touches' in e ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY;
+    const yRatio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+
+    // Perceptual saturation: S = 100 * (1 - y)^0.5
+    const gammaSat = 0.5;
+    const newS = 100 * Math.pow(1 - yRatio, gammaSat);
+    const newHsl = { ...hslValues, s: newS };
+    setHslValues(newHsl);
+    const rgb = hslToRgb(newHsl.h, newHsl.s, newHsl.l);
+    setRgbValues(rgb);
   };
 
   // Compute current hex for preview
@@ -136,26 +223,53 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
           <>
             <div className="px-5 pt-5 pb-3 shrink-0 relative z-10 shadow-[0_4px_20px_-12px_rgba(0,0,0,0.05)]">
               <div className="flex flex-col lg:flex-row gap-4 mb-4">
-                <div className="lg:w-1/2 relative">
-                  <canvas
-                    ref={canvasRef} width={400} height={60}
-                    className="w-full h-20 lg:h-full rounded-xl border border-slate-200 cursor-crosshair shadow-sm block"
-                    onMouseDown={handleInteract}
-                    onMouseMove={(e) => e.buttons === 1 && handleInteract(e)}
-                    onTouchMove={handleInteract}
-                  />
-                  <div
-                    className="absolute w-6 h-6 rounded-full shadow-[0_0_4px_rgba(0,0,0,0.5)] pointer-events-none flex items-center justify-center"
-                    style={{
-                      left: `${(hslValues.h / 360) * 100}%`,
-                      top: `${Math.max(0, Math.min(100, ((85 - hslValues.l) / 70) * 100))}%`,
-                      transform: 'translate(-50%, -50%)',
-                      background: `conic-gradient(#ffffff ${hslValues.s}%, rgba(255,255,255,0.3) 0)`
-                    }}
-                  >
+                <div className="lg:w-1/2 flex gap-2">
+                  <div className="flex-1 relative">
+                    <canvas
+                      ref={canvasRef} width={400} height={100}
+                      className="w-full h-24 lg:h-full rounded-xl border border-slate-200 cursor-crosshair shadow-sm block"
+                      onMouseDown={handleInteract}
+                      onMouseMove={(e) => e.buttons === 1 && handleInteract(e)}
+                      onTouchMove={handleInteract}
+                    />
                     <div
-                      className="w-4 h-4 rounded-full border border-black/10 shadow-sm"
-                      style={{ backgroundColor: computedHex }}
+                      className="absolute w-5 h-5 rounded-full shadow-[0_0_0_2px_white,0_0_4px_rgba(0,0,0,0.5)] pointer-events-none"
+                      style={{
+                        left: `${hueToPerceptual(hslValues.h) * 100}%`,
+                        top: `${(() => {
+                          const l = hslValues.l;
+                          const gammaLight = 0.7;
+                          const gammaDark = 0.5;
+                          // Inverse of asymmetric curve
+                          if (l >= 50) {
+                            return (Math.pow((100 - l) / 50, 1 / gammaLight) / 2) * 100;
+                          } else {
+                            return (1 - Math.pow(l / 50, 1 / gammaDark) / 2) * 100;
+                          }
+                        })()}%`,
+                        transform: 'translate(-50%, -50%)',
+                        backgroundColor: computedHex
+                      }}
+                    />
+                  </div>
+                  <div className="w-6 relative shrink-0">
+                    <canvas
+                      ref={satCanvasRef} width={24} height={100}
+                      className="w-full h-24 lg:h-full rounded-lg border border-slate-200 cursor-pointer shadow-sm block"
+                      onMouseDown={handleSatInteract}
+                      onMouseMove={(e) => e.buttons === 1 && handleSatInteract(e)}
+                      onTouchMove={handleSatInteract}
+                    />
+                    <div
+                      className="absolute left-0 right-0 h-1.5 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.2)] pointer-events-none"
+                      style={{
+                        top: `${(() => {
+                          // Inverse of S = 100 * (1 - y)^0.5 => y = 1 - (S/100)^2
+                          const gammaSat = 0.5;
+                          return (1 - Math.pow(hslValues.s / 100, 1 / gammaSat)) * 100;
+                        })()}%`,
+                        transform: 'translateY(-50%)'
+                      }}
                     />
                   </div>
                 </div>
