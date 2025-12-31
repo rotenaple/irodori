@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { rgbToHex, hexToRgb, rgbToHsl, hslToRgb, hslToHex, HTML_COLORS } from '../utils/colorUtils';
 import { PALETTES } from '../constants/palettes';
 import { ColorInstance } from '../types';
+import { getCachedHueLightnessGradients, generateSaturationGradient } from '../utils/gradientCache';
 
 interface ColorPickerModalProps {
   currentHex: string;
@@ -40,6 +41,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
   currentHex, onChange, onClose, title, mode, suggestions = [], showNoneOption = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const grayscaleCanvasRef = useRef<HTMLCanvasElement>(null);
   const satCanvasRef = useRef<HTMLCanvasElement>(null);
   const [paletteTab, setPaletteTab] = useState<'classic' | 'bright'>('classic');
   const [colorMode, setColorMode] = useState<'rgb' | 'hsl'>('rgb');
@@ -53,42 +55,25 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
     setHslValues(rgbToHsl(rgb.r, rgb.g, rgb.b));
   }, [currentHex]);
 
-  // Draw main Hue x Lightness canvas with perceptual hue correction
+  // Draw main Hue x Lightness canvas using pre-baked gradients (optimized)
+  // Uses dual-layer approach: saturated (S=100%) + grayscale (S=0%) overlay
   useEffect(() => {
     if (mode !== 'spectrum') return;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const grayscaleCanvas = grayscaleCanvasRef.current;
+    if (!canvas || !grayscaleCanvas) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const grayCtx = grayscaleCanvas.getContext('2d');
+    if (!ctx || !grayCtx) return;
 
     const { width, height } = canvas;
-    for (let x = 0; x < width; x++) {
-      const t = x / width;
-      const hue = perceptualToHue(t);
-      const sat = hslValues.s; // Use current saturation
-      const grad = ctx.createLinearGradient(0, 0, 0, height);
-      // Asymmetric curve: compress whites harder, blacks moderately
-      const steps = 20;
-      const gammaLight = 0.7; // smoother white transition
-      const gammaDark = 0.5;  // compress blacks harder
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps; // 0 to 1 (top to bottom)
-        let l: number;
-        if (t <= 0.5) {
-          // Top half: white to mid (L=100 to L=50)
-          l = 100 - 50 * Math.pow(t * 2, gammaLight);
-        } else {
-          // Bottom half: mid to black (L=50 to L=0)
-          l = 50 * Math.pow((1 - t) * 2, gammaDark);
-        }
-        grad.addColorStop(t, `hsl(${hue}, ${sat}%, ${l}%)`);
-      }
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, 0, 1, height);
-    }
-  }, [mode, hslValues.s]);
+    // Get both pre-baked gradients from cache (generated once, reused)
+    const { saturated, grayscale } = getCachedHueLightnessGradients(width, height);
+    ctx.putImageData(saturated, 0, 0);
+    grayCtx.putImageData(grayscale, 0, 0);
+  }, [mode]); // Only redraws on mode change!
 
-  // Draw Saturation slider canvas with perceptual scaling
+  // Draw Saturation slider canvas with perceptual scaling (optimized with ImageData)
   useEffect(() => {
     if (mode !== 'spectrum') return;
     const canvas = satCanvasRef.current;
@@ -97,17 +82,10 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
     if (!ctx) return;
 
     const { width, height } = canvas;
-    const grad = ctx.createLinearGradient(0, 0, 0, height);
-    // Power curve to compress greys (low sat) into bottom, stretch colorful range
-    const gammaSat = 0.5;
-    const steps = 20;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps; // 0 to 1 (top to bottom)
-      const s = 100 * Math.pow(1 - t, gammaSat); // top=100%, bottom=0%
-      grad.addColorStop(t, `hsl(${hslValues.h}, ${s}%, ${hslValues.l}%)`);
-    }
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
+    // Use direct pixel manipulation instead of gradient color stops
+    // This is faster as it avoids string parsing and gradient interpolation
+    const imageData = generateSaturationGradient(width, height, hslValues.h, hslValues.l);
+    ctx.putImageData(imageData, 0, 0);
   }, [mode, hslValues.h, hslValues.l]);
 
   const handleInteract = (e: React.MouseEvent | React.TouchEvent) => {
@@ -231,6 +209,11 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
                       onMouseDown={handleInteract}
                       onMouseMove={(e) => e.buttons === 1 && handleInteract(e)}
                       onTouchMove={handleInteract}
+                    />
+                    <canvas
+                      ref={grayscaleCanvasRef} width={400} height={100}
+                      className="absolute inset-0 w-full h-24 lg:h-full rounded-xl pointer-events-none"
+                      style={{ opacity: (100 - hslValues.s) / 100 }}
                     />
                     <div
                       className="absolute w-5 h-5 rounded-full shadow-[0_0_0_2px_white,0_0_4px_rgba(0,0,0,0.5)] pointer-events-none"
