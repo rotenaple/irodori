@@ -136,7 +136,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
           <>
             <div className="px-5 pt-5 pb-3 shrink-0 relative z-10 shadow-[0_4px_20px_-12px_rgba(0,0,0,0.05)]">
               <div className="flex flex-col lg:flex-row gap-4 mb-4">
-                <div className="lg:w-1/2">
+                <div className="lg:w-1/2 relative">
                   <canvas
                     ref={canvasRef} width={400} height={60}
                     className="w-full h-20 lg:h-full rounded-xl border border-slate-200 cursor-crosshair shadow-sm block"
@@ -144,6 +144,20 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = ({
                     onMouseMove={(e) => e.buttons === 1 && handleInteract(e)}
                     onTouchMove={handleInteract}
                   />
+                  <div
+                    className="absolute w-6 h-6 rounded-full shadow-[0_0_4px_rgba(0,0,0,0.5)] pointer-events-none flex items-center justify-center"
+                    style={{
+                      left: `${(hslValues.h / 360) * 100}%`,
+                      top: `${Math.max(0, Math.min(100, ((85 - hslValues.l) / 70) * 100))}%`,
+                      transform: 'translate(-50%, -50%)',
+                      background: `conic-gradient(#ffffff ${hslValues.s}%, rgba(255,255,255,0.3) 0)`
+                    }}
+                  >
+                    <div
+                      className="w-4 h-4 rounded-full border border-black/10 shadow-sm"
+                      style={{ backgroundColor: computedHex }}
+                    />
+                  </div>
                 </div>
 
                 <div className="lg:w-1/2 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-3">
