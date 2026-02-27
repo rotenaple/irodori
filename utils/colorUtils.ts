@@ -46,9 +46,9 @@ export const hslToRgb = (h: number, s: number, l: number): ColorRGB => {
   const hue2rgb = (p: number, q: number, t: number) => {
     if (t < 0) t += 1;
     if (t > 1) t -= 1;
-    if (t < 1/6) return p + (q - p) * 6 * t;
-    if (t < 1/2) return q;
-    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
     return p;
   };
 
@@ -58,9 +58,9 @@ export const hslToRgb = (h: number, s: number, l: number): ColorRGB => {
   } else {
     const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
     const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1/3);
+    r = hue2rgb(p, q, h + 1 / 3);
     g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1/3);
+    b = hue2rgb(p, q, h - 1 / 3);
   }
 
   return {
@@ -123,19 +123,19 @@ export const shiftHue = (h: number, shift: number): number => {
 export const applyHueTint = (hex: string, baseHue: number, targetHue: number): string => {
   const hsl = hexToHsl(hex);
   if (!hsl) return hex;
-  
+
   // For achromatic colors (very low saturation), optionally add saturation
   // or return unchanged - we'll preserve them unchanged for now
   if (hsl.s < 5) {
     return hex;
   }
-  
+
   // Calculate the hue offset from the group's base hue
   const hueOffset = getHueDifference(baseHue, hsl.h);
-  
+
   // Apply the same offset to the target hue
   const newHue = shiftHue(targetHue, hueOffset);
-  
+
   return hslToHex(newHue, hsl.s, hsl.l);
 };
 
@@ -146,36 +146,36 @@ export const applyHueTint = (hex: string, baseHue: number, targetHue: number): s
 export const applyTintToHex = (hex: string, baseHue: number, tint: TintSettings): string => {
   const hsl = hexToHsl(hex);
   if (!hsl) return hex;
-  
+
   // For achromatic colors (very low saturation), only apply lightness
   if (hsl.s < 5) {
     const lForce = tint.lightnessForce / 100;
     const adjustedL = Math.max(0, Math.min(100, hsl.l + tint.lightness * lForce));
     return hslToHex(hsl.h, hsl.s, adjustedL);
   }
-  
+
   // Calculate the hue offset from the group's base hue
   const hueOffset = getHueDifference(baseHue, hsl.h);
-  
+
   // Apply the same offset to the target hue
   const targetHue = shiftHue(tint.hue, hueOffset);
-  
+
   // Apply individual force values for H, S, L
   const hForce = tint.hueForce / 100;
   const sForce = tint.saturationForce / 100;
   const lForce = tint.lightnessForce / 100;
-  
+
   // Blend hue based on hueForce
   const newHue = hForce < 1 ? hsl.h + (targetHue - hsl.h) * hForce : targetHue;
-  
+
   // Apply saturation shift with saturationForce
   const saturationShift = tint.saturation * sForce;
   const newS = Math.max(0, Math.min(100, hsl.s + saturationShift));
-  
+
   // Apply lightness shift with lightnessForce
   const lightnessShift = tint.lightness * lForce;
   const newL = Math.max(0, Math.min(100, hsl.l + lightnessShift));
-  
+
   return hslToHex(newHue, newS, newL);
 };
 
@@ -187,26 +187,26 @@ export const calculateGroupBaseHue = (members: ColorInstance[]): number => {
   let sinSum = 0;
   let cosSum = 0;
   let totalWeight = 0;
-  
+
   for (const member of members) {
     const hsl = hexToHsl(member.hex);
     if (!hsl || hsl.s < 5) continue; // Skip achromatic colors
-    
+
     const radians = (hsl.h * Math.PI) / 180;
     const weight = member.count;
     sinSum += Math.sin(radians) * weight;
     cosSum += Math.cos(radians) * weight;
     totalWeight += weight;
   }
-  
+
   if (totalWeight === 0) {
     // All colors are achromatic, return 0 as default
     return 0;
   }
-  
+
   let avgHue = Math.atan2(sinSum / totalWeight, cosSum / totalWeight) * (180 / Math.PI);
   if (avgHue < 0) avgHue += 360;
-  
+
   return avgHue;
 };
 
@@ -219,11 +219,11 @@ export const isAchromatic = (hex: string, threshold: number = 5): boolean => {
 };
 
 export const getColorDistance = (c1: ColorRGB, c2: ColorRGB): number => {
-  return Math.sqrt(
-    Math.pow(c1.r - c2.r, 2) +
-    Math.pow(c1.g - c2.g, 2) +
-    Math.pow(c1.b - c2.b, 2)
-  );
+  const dr = c1.r - c2.r;
+  const dg = c1.g - c2.g;
+  const db = c1.b - c2.b;
+  // Perceptual distance using integer math: (dr^2 * 306 + dg^2 * 601 + db^2 * 117) / 1024
+  return Math.sqrt((dr * dr * 306 + dg * dg * 601 + db * db * 117) >> 10);
 };
 
 export const sigmoidSnap = (r: number, k: number = 12): number => {
@@ -235,17 +235,15 @@ export const findClosestColor = (pixel: ColorRGB, palette: PaletteColor[], coreW
 
   let minDistanceSq = Infinity;
   let closestColor = palette[0];
-  const { r, g, b } = pixel; // Destructure once
+  const { r, g, b } = pixel;
 
   for (let i = 0; i < palette.length; i++) {
     const color = palette[i];
-    // Inline squared distance calculation to avoid function call overhead and sqrt
-    let distSq = (r - color.r) ** 2 + (g - color.g) ** 2 + (b - color.b) ** 2;
+    const dr = r - color.r, dg = g - color.g, db = b - color.b;
+    // Fast perceptual weighting using integer approximation (base 1024)
+    let distSq = (dr * dr * 306 + dg * dg * 601 + db * db * 117) >> 10;
 
-    // Applying weight effectively means dealing with distance, so we square the weight for squared distance comparison
     if (color.id.startsWith('group-')) {
-      // approximate: if we want to weight the distance, typically we multiply the distance.
-      // d' = d * w => d'^2 = d^2 * w^2
       distSq *= (coreWeight * coreWeight);
     }
 
@@ -450,8 +448,8 @@ const processFrequencyMap = (frequencyMap: Record<string, number>, totalSamples:
 };
 
 export const recolorSvg = (
-  svgContent: string, 
-  colorGroups: ColorGroup[], 
+  svgContent: string,
+  colorGroups: ColorGroup[],
   colorOverrides: Record<string, string>,
   tintOverrides?: Record<string, TintSettings>
 ): string => {
@@ -484,20 +482,20 @@ export const recolorSvg = (
   // Helper to apply transformation based on mode
   const transformColor = (hex: string): string => {
     const lowerHex = hex.toLowerCase();
-    
+
     // 1. Apply Palette Override
     // If a manual override exists (or a synced tint override), use it directly.
     // This prevents double-tinting since the override already contains the tinted color.
     if (colorToTarget[lowerHex]) {
       return colorToTarget[lowerHex];
     }
-    
+
     // 2. Apply Tint Override
     const groupInfo = colorToGroupInfo[lowerHex];
     if (groupInfo) {
       return applyTintToHex(hex, groupInfo.baseHue, groupInfo.tint);
     }
-    
+
     return hex;
   };
 

@@ -12,6 +12,12 @@ import {
 
 const rgbToInt = (r: number, g: number, b: number): number => (r << 16) | (g << 8) | b;
 
+// Fast perceptual squared distance using integer weights (306, 601, 117 sum to 1024)
+const getDistSq = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number): number => {
+    const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
+    return (dr * dr * 306 + dg * dg * 601 + db * db * 117) >> 10;
+};
+
 function applyTintRGB(r: number, g: number, b: number, baseHue: number, tint: TintSettings): ColorRGB {
     const hsl = rgbToHsl(r, g, b);
     let { h, s, l } = hsl;
@@ -32,7 +38,7 @@ async function intelligentCompress(canvas: OffscreenCanvas, isAutoMode: boolean)
     try {
         const gifBlob = await canvas.convertToBlob({ type: 'image/gif' });
         if (gifBlob.size <= TARGET_SIZE) return gifBlob;
-    } catch {}
+    } catch { }
     let low = 0.5, high = 1.0, bestBlob = pngBlob;
     for (let i = 0; i < 6; i++) {
         const mid = (low + high) / 2;
@@ -52,8 +58,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const nativeWidth = imageBitmap.width, nativeHeight = imageBitmap.height;
         let targetUpscale = 1;
         if (!disableScaling) {
-            targetUpscale = upscaleFactor === 'NS' 
-                ? (nativeWidth >= nativeHeight ? Math.min(535/nativeWidth, 355/nativeHeight) : Math.min(321/nativeWidth, 568/nativeHeight))
+            targetUpscale = upscaleFactor === 'NS'
+                ? (nativeWidth >= nativeHeight ? Math.min(535 / nativeWidth, 355 / nativeHeight) : Math.min(321 / nativeWidth, 568 / nativeHeight))
                 : (upscaleFactor as number);
         }
 
@@ -72,7 +78,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             const processH = nativeHeight - offY;
             const targetW = Math.floor(processW / blockW);
             const targetH = Math.floor(processH / blockH);
-            
+
             if (targetW <= 0 || targetH <= 0) {
                 // Fallback if settings result in invalid size
                 self.postMessage({ type: 'complete', error: 'Pixel Art settings resulted in invalid image size.' });
@@ -82,7 +88,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             const pCanvas = new OffscreenCanvas(targetW, targetH);
             const pCtx = pCanvas.getContext('2d', { willReadFrequently: true, alpha: true });
             pCtx!.imageSmoothingEnabled = false;
-            
+
             // Draw only the aligned region
             const sourceRegionW = targetW * blockW;
             const sourceRegionH = targetH * blockH;
@@ -92,7 +98,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const pData = pCtx!.getImageData(0, 0, targetW, targetH);
                 const pixels = pData.data;
                 const paletteSize = palette.length;
-                
+
                 // Prepare Palette & Cache
                 const pR = new Uint8Array(paletteSize), pG = new Uint8Array(paletteSize), pB = new Uint8Array(paletteSize);
                 const pTR = new Uint8Array(paletteSize), pTG = new Uint8Array(paletteSize), pTB = new Uint8Array(paletteSize);
@@ -131,37 +137,38 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                 // Apply Recoloring
                 for (let i = 0; i < pixels.length; i += 4) {
-                    if (pixels[i+3] === 0) continue; // Skip transparent
-                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                    if (pixels[i + 3] === 0) continue; // Skip transparent
+                    const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
                     const key = rgbToInt(r, g, b);
                     let pIdx = colorToIdxCache.get(key);
-                    
+
                     if (pIdx === undefined) {
                         let minDistSq = Infinity;
                         for (let j = 0; j < paletteSize; j++) {
-                            const dSq = (r - pR[j])**2 + (g - pG[j])**2 + (b - pB[j])**2;
+                            const dr = r - pR[j], dg = g - pG[j], db = b - pB[j];
+                            const dSq = (dr * dr * 306 + dg * dg * 601 + db * db * 117) >> 10;
                             if (dSq < minDistSq) { minDistSq = dSq; pIdx = j; }
                         }
                         colorToIdxCache.set(key, pIdx!);
                     }
-                    
+
                     if (pIdx !== undefined) {
                         pixels[i] = pTR[pIdx];
-                        pixels[i+1] = pTG[pIdx];
-                        pixels[i+2] = pTB[pIdx];
+                        pixels[i + 1] = pTG[pIdx];
+                        pixels[i + 2] = pTB[pIdx];
                     }
                 }
                 pCtx!.putImageData(pData, 0, 0);
             }
-            
+
             // Integer Scaling to fit target output size
             const maxW = nativeWidth * targetUpscale;
             const maxH = nativeHeight * targetUpscale;
             const scale = Math.max(1, Math.floor(Math.min(maxW / targetW, maxH / targetH)));
-            
+
             const finalW = targetW * scale;
             const finalH = targetH * scale;
-            
+
             const fCanvas = new OffscreenCanvas(finalW, finalH);
             const fCtx = fCanvas.getContext('2d');
             fCtx!.imageSmoothingEnabled = false;
@@ -244,20 +251,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         }
 
         for (let i = 0; i < nativePixelData.length; i += 4) {
-            const r = nativePixelData[i], g = nativePixelData[i+1], b = nativePixelData[i+2];
+            const r = nativePixelData[i], g = nativePixelData[i + 1], b = nativePixelData[i + 2];
             const key = rgbToInt(r, g, b);
             let pIdx = colorToIdxCache.get(key);
             if (pIdx === undefined) {
                 let minDistSq = Infinity;
                 for (let j = 0; j < paletteSize; j++) {
-                    const dSq = (r - pR[j])**2 + (g - pG[j])**2 + (b - pB[j])**2;
+                    const dr = r - pR[j], dg = g - pG[j], db = b - pB[j];
+                    const dSq = (dr * dr * 306 + dg * dg * 601 + db * db * 117) >> 10;
                     if (dSq < minDistSq) { minDistSq = dSq; pIdx = j; }
                 }
                 colorToIdxCache.set(key, pIdx!);
             }
             const pxIdx = i >> 2;
             lowResIdxMap[pxIdx] = pIdx!;
-            if (nativeAlpha) nativeAlpha[pxIdx] = nativePixelData[i+3];
+            if (nativeAlpha) nativeAlpha[pxIdx] = nativePixelData[i + 3];
         }
         console.log(`[WORKER] Phase 1: ${Math.round(performance.now() - p1Start)}ms`);
 
@@ -302,7 +310,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const rOff = y * nativeWidth;
                     for (let x = 1; x < nativeWidth - 1; x++) {
                         const i = rOff + x, c = lowResIdxMap[i];
-                        if (c !== lowResIdxMap[i-1] || c !== lowResIdxMap[i+1] || c !== lowResIdxMap[i-nativeWidth] || c !== lowResIdxMap[i+nativeWidth]) {
+                        if (c !== lowResIdxMap[i - 1] || c !== lowResIdxMap[i + 1] || c !== lowResIdxMap[i - nativeWidth] || c !== lowResIdxMap[i + nativeWidth]) {
                             activeMask[i] = 1;
                         } else {
                             activeMask[i] = 0; tempIdxMap[i] = c;
@@ -340,17 +348,18 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                         if (m1 !== m2 && m2 !== m3) {
                             const c1 = getColor(m1), c2 = getColor(m2), c3 = getColor(m3);
-                            const d13Sq = (c1.r-c3.r)**2 + (c1.g-c3.g)**2 + (c1.b-c3.b)**2;
-                            const d12Sq = (c1.r-c2.r)**2 + (c1.g-c2.g)**2 + (c1.b-c2.b)**2;
-                            const d23Sq = (c3.r-c2.r)**2 + (c3.g-c2.g)**2 + (c3.b-c2.b)**2;
-                            if (d12Sq + d23Sq + 2*Math.sqrt(d12Sq * d23Sq) < d13Sq * 1.21) { m2 = m3; m2c = m3c; }
+                            const d13Sq = getDistSq(c1.r, c1.g, c1.b, c3.r, c3.g, c3.b);
+                            const d12Sq = getDistSq(c1.r, c1.g, c1.b, c2.r, c2.g, c2.b);
+                            const d23Sq = getDistSq(c3.r, c3.g, c3.b, c2.r, c2.g, c2.b);
+                            // Tightened from 1.21 to 1.02 for stricter boundary purity
+                            if (d12Sq + d23Sq + 2 * Math.sqrt(d12Sq * d23Sq) < d13Sq * 1.02) { m2 = m3; m2c = m3c; }
                         }
-                        if (m2c < ((yE-yS+1)*(xE-xS+1)) * 0.10) m2 = m1;
+                        if (m2c < ((yE - yS + 1) * (xE - xS + 1)) * 0.10) m2 = m1;
 
                         const cur = lowResIdxMap[idx], sI = idx << 2;
                         const c1 = getColor(m1), c2 = getColor(m2);
-                        let e1 = (nativePixelData[sI]-c1.r)**2 + (nativePixelData[sI+1]-c1.g)**2 + (nativePixelData[sI+2]-c1.b)**2;
-                        let e2 = (nativePixelData[sI]-c2.r)**2 + (nativePixelData[sI+1]-c2.g)**2 + (nativePixelData[sI+2]-c2.b)**2;
+                        let e1 = getDistSq(nativePixelData[sI], nativePixelData[sI + 1], nativePixelData[sI + 2], c1.r, c1.g, c1.b);
+                        let e2 = getDistSq(nativePixelData[sI], nativePixelData[sI + 1], nativePixelData[sI + 2], c2.r, c2.g, c2.b);
                         const curGroupKey = getGroupKey(cur);
                         if (curGroupKey === m1) e1 *= stiffness; else if (curGroupKey === m2) e2 *= stiffness;
                         tempIdxMap[idx] = e1 < e2 ? groupKeyToPaletteIdx(m1) : groupKeyToPaletteIdx(m2);
@@ -378,7 +387,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         for (let i = 0; i < paletteSize; i++) {
             const p = palette[i];
             let r = p.r, g = p.g, b = p.b;
-            
+
             // Prioritize explicit targetHex (from manual override or synced tint)
             if (p.targetHex) {
                 const trgb = hexToRgb(p.targetHex);
@@ -456,12 +465,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 }
 
                 if (ucLen === 1) {
-                    const id = groupKeyToPaletteIdxPhase3(uC[0]); outData[oIdx] = pTR[id]; outData[oIdx+1] = pTG[id]; outData[oIdx+2] = pTB[id];
-                    outData[oIdx+3] = nativeAlpha ? (aI === 0 ? nativeAlpha[nativeRow + lx] : (aSigmoidLUT[hResData[oIdx+3]] * 255) | 0) : 255;
+                    const id = groupKeyToPaletteIdxPhase3(uC[0]); outData[oIdx] = pTR[id]; outData[oIdx + 1] = pTG[id]; outData[oIdx + 2] = pTB[id];
+                    outData[oIdx + 3] = nativeAlpha ? (aI === 0 ? nativeAlpha[nativeRow + lx] : (aSigmoidLUT[hResData[oIdx + 3]] * 255) | 0) : 255;
                     continue;
                 }
 
-                const rR = hResData[oIdx], rG = hResData[oIdx+1], rB = hResData[oIdx+2];
+                const rR = hResData[oIdx], rG = hResData[oIdx + 1], rB = hResData[oIdx + 2];
                 let scLen = 0;
                 cand: for (let i = 0; i < ucLen; i++) {
                     const gKeyI = uC[i], cI = getColorPhase3(gKeyI);
@@ -471,10 +480,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                         for (let k = 0; k < ucLen; k++) {
                             const gKeyK = uC[k]; if (gKeyK === gKeyI || gKeyJ === gKeyK) continue;
                             const cK = getColorPhase3(gKeyK);
-                            const dAB = (cJ.r-cK.r)**2 + (cJ.g-cK.g)**2 + (cJ.b-cK.b)**2;
-                            const dAC = (cJ.r-cI.r)**2 + (cJ.g-cI.g)**2 + (cJ.b-cI.b)**2;
-                            const dBC = (cK.r-cI.r)**2 + (cK.g-cI.g)**2 + (cK.b-cI.b)**2;
-                            if (dAC + dBC + 2*Math.sqrt(dAC*dBC) < dAB * 1.21 && dAB > 100 && rw[gKeyJ] > rw[gKeyI] && rw[gKeyK] > rw[gKeyI]) continue cand;
+                            const dAB = getDistSq(cJ.r, cJ.g, cJ.b, cK.r, cK.g, cK.b);
+                            const dAC = getDistSq(cJ.r, cJ.g, cJ.b, cI.r, cI.g, cI.b);
+                            const dBC = getDistSq(cK.r, cK.g, cK.b, cI.r, cI.g, cI.b);
+                            // Tightened from 1.21 to 1.02 and removed 100 noise floor for low-contrast edges
+                            if (dAC + dBC + 2 * Math.sqrt(dAC * dBC) < dAB * 1.02 && rw[gKeyJ] > rw[gKeyI] && rw[gKeyK] > rw[gKeyI]) continue cand;
                         }
                     }
                     sC[scLen++] = gKeyI;
@@ -495,16 +505,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 for (let i = 0; i < scLen; i++) {
                     const gKey = sC[i];
                     const c = getColorPhase3(gKey);
-                    const score = (rw[gKey] * 10) + (rAdj[gKey] ? 0 : -1000) - ((rR-c.r)**2 + (rG-c.g)**2 + (rB-c.b)**2);
+                    const score = (rw[gKey] * 10) + (rAdj[gKey] ? 0 : -1000) - getDistSq(rR, rG, rB, c.r, c.g, c.b);
                     if (score > maxS) { maxS = score; m1 = gKey; }
                 }
-                
+
                 let m2 = m1, sM2 = -Infinity;
                 for (let i = 0; i < scLen; i++) {
                     const gKey = sC[i];
                     if (gKey === m1) continue;
                     const c = getColorPhase3(gKey);
-                    const score = (rw[gKey] * 10) + (rAdj[gKey] ? 0 : -1000) - ((rR-c.r)**2 + (rG-c.g)**2 + (rB-c.b)**2);
+                    const score = (rw[gKey] * 10) + (rAdj[gKey] ? 0 : -1000) - getDistSq(rR, rG, rB, c.r, c.g, c.b);
                     if (score > sM2) { sM2 = score; m2 = gKey; }
                 }
                 if (sM2 <= -500) m2 = m1;
@@ -522,30 +532,30 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const cB = getColorPhase3(bB);
 
                 if (bA === bB || intensity === 0) {
-                    const win = ((rR-cA.r)**2+(rG-cA.g)**2+(rB-cA.b)**2 < (rR-cB.r)**2+(rG-cB.g)**2+(rB-cB.b)**2) ? bAIdx : bBIdx;
-                    outData[oIdx] = pTR[win]; outData[oIdx+1] = pTG[win]; outData[oIdx+2] = pTB[win];
+                    const win = (getDistSq(rR, rG, rB, cA.r, cA.g, cA.b) < getDistSq(rR, rG, rB, cB.r, cB.g, cB.b)) ? bAIdx : bBIdx;
+                    outData[oIdx] = pTR[win]; outData[oIdx + 1] = pTG[win]; outData[oIdx + 2] = pTB[win];
                 } else {
-                    const c1r = cA.r, c1g = cA.g, c1b = cA.b, dr = cB.r-c1r, dg = cB.g-c1g, db = cB.b-c1b, lSq = dr*dr+dg*dg+db*db;
-                    let t = lSq > 0 ? Math.max(0, Math.min(1, ((rR-c1r)*dr+(rG-c1g)*dg+(rB-c1b)*db)/lSq)) : 0;
+                    const c1r = cA.r, c1g = cA.g, c1b = cA.b, dr = cB.r - c1r, dg = cB.g - c1g, db = cB.b - c1b, lSq = dr * dr + dg * dg + db * db;
+                    let t = lSq > 0 ? Math.max(0, Math.min(1, ((rR - c1r) * dr + (rG - c1g) * dg + (rB - c1b) * db) / lSq)) : 0;
                     if (t > 0 && t < 1 && (t < 0.4 || t > 0.6)) {
-                        const mr = (c1r+cB.r)/2, mg = (c1g+cB.g)/2, mb = (c1b+cB.b)/2, rDSq = (c1r-mr)**2+(c1g-mg)**2+(c1b-mb)**2;
+                        const mr = (c1r + cB.r) / 2, mg = (c1g + cB.g) / 2, mb = (c1b + cB.b) / 2, rDSq = getDistSq(c1r, c1g, c1b, mr, mg, mb);
                         let ok = false, sRad = intensity > 0.7 ? 3 : 2;
                         search: for (let ny = -sRad; ny <= sRad; ny++) {
                             for (let nx = -sRad; nx <= sRad; nx++) {
                                 if (nx === 0 && ny === 0) continue;
-                                const nY = Math.max(0, Math.min(fWHeight-1, y+ny)), nX = Math.max(0, Math.min(fWWidth-1, x+nx)), nI = (nY*fWWidth+nX)<<2;
-                                if ((hResData[nI]-mr)**2+(hResData[nI+1]-mg)**2+(hResData[nI+2]-mb)**2 < rDSq*(0.6+intensity*0.2)) { ok = true; break search; }
+                                const nY = Math.max(0, Math.min(fWHeight - 1, y + ny)), nX = Math.max(0, Math.min(fWWidth - 1, x + nx)), nI = (nY * fWWidth + nX) << 2;
+                                if (getDistSq(hResData[nI], hResData[nI + 1], hResData[nI + 2], mr, mg, mb) < rDSq * (0.6 + intensity * 0.2)) { ok = true; break search; }
                             }
                         }
                         if (!ok) t = t < 0.5 ? 0 : 1;
                     }
-                    if (t > 0 && t < 0.25 && (rR-c1r)**2+(rG-c1g)**2+(rB-c1b)**2 < lSq*(0.05*(1-intensity))) t = 0;
+                    if (t > 0 && t < 0.25 && getDistSq(rR, rG, rB, c1r, c1g, c1b) < lSq * (0.05 * (1 - intensity))) t = 0;
                     const fT = sigmoidLUT[(t * 1024) | 0];
-                    outData[oIdx] = (pTR[bAIdx] + fT * (pTR[bBIdx]-pTR[bAIdx])) | 0;
-                    outData[oIdx+1] = (pTG[bAIdx] + fT * (pTG[bBIdx]-pTG[bAIdx])) | 0;
-                    outData[oIdx+2] = (pTB[bAIdx] + fT * (pTB[bBIdx]-pTB[bAIdx])) | 0;
+                    outData[oIdx] = (pTR[bAIdx] + fT * (pTR[bBIdx] - pTR[bAIdx])) | 0;
+                    outData[oIdx + 1] = (pTG[bAIdx] + fT * (pTG[bBIdx] - pTG[bAIdx])) | 0;
+                    outData[oIdx + 2] = (pTB[bAIdx] + fT * (pTB[bBIdx] - pTB[bAIdx])) | 0;
                 }
-                outData[oIdx+3] = nativeAlpha && hResData[oIdx+3] < 255 ? (aSigmoidLUT[hResData[oIdx+3]] * 255) | 0 : 255;
+                outData[oIdx + 3] = nativeAlpha && hResData[oIdx + 3] < 255 ? (aSigmoidLUT[hResData[oIdx + 3]] * 255) | 0 : 255;
             }
         }
         console.log(`[WORKER] Phase 3: ${Math.round(performance.now() - p3Start)}ms`);
