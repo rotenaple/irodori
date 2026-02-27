@@ -209,6 +209,35 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             }
         }
 
+        const colorGroups = parameters.colorGroups || [];
+        const groupCount = colorGroups.length;
+        const paletteToGroup = new Int16Array(paletteSize).fill(-1);
+        const groupCanonicalR = new Int16Array(groupCount);
+        const groupCanonicalG = new Int16Array(groupCount);
+        const groupCanonicalB = new Int16Array(groupCount);
+
+        for (let gi = 0; gi < groupCount; gi++) {
+            const g = colorGroups[gi];
+            const pIdx = paletteIdMap.get(g.id);
+            if (pIdx !== undefined) {
+                paletteToGroup[pIdx] = gi;
+                let r = 0, g_ = 0, b = 0, count = 0;
+                for (const m of g.members) {
+                    const rgb = hexToRgb(m.hex);
+                    if (rgb) { r += rgb.r; g_ += rgb.g; b += rgb.b; count++; }
+                }
+                if (count > 0) {
+                    groupCanonicalR[gi] = Math.round(r / count);
+                    groupCanonicalG[gi] = Math.round(g_ / count);
+                    groupCanonicalB[gi] = Math.round(b / count);
+                } else {
+                    groupCanonicalR[gi] = pR[pIdx];
+                    groupCanonicalG[gi] = pG[pIdx];
+                    groupCanonicalB[gi] = pB[pIdx];
+                }
+            }
+        }
+
         let nativeAlpha: Uint8ClampedArray | null = null;
         if (preserveTransparency) {
             nativeAlpha = new Uint8ClampedArray(nativeWidth * nativeHeight);
@@ -237,11 +266,35 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             const p2Start = performance.now();
             const tempIdxMap = new Int16Array(lowResIdxMap.length);
             const activeMask = new Uint8Array(lowResIdxMap.length);
-            const localCounts = new Uint32Array(paletteSize);
-            const foundColors = new Uint16Array(paletteSize);
+            const maxGroups = groupCount + paletteSize;
+            const localCounts = new Uint32Array(maxGroups);
+            const foundColors = new Uint16Array(maxGroups);
             const stiffness = 1.0 - (vertexInertia / 100) * 0.8;
             const radius = edgeProtection > 85 ? 5 : edgeProtection > 66 ? 3 : Math.max(1, Math.round((edgeProtection / 100) * 3));
             const iters = edgeProtection > 85 ? 5 : edgeProtection > 66 ? 3 : Math.max(1, Math.round((edgeProtection / 100) * 4));
+
+            const getGroupKey = (pIdx: number): number => {
+                const gId = paletteToGroup[pIdx];
+                return gId >= 0 ? gId : groupCount + pIdx;
+            };
+
+            const getColor = (groupKey: number): { r: number; g: number; b: number } => {
+                if (groupKey < groupCount) {
+                    return { r: groupCanonicalR[groupKey], g: groupCanonicalG[groupKey], b: groupCanonicalB[groupKey] };
+                }
+                const pIdx = groupKey - groupCount;
+                return { r: pR[pIdx], g: pG[pIdx], b: pB[pIdx] };
+            };
+
+            const groupKeyToPaletteIdx = (groupKey: number): number => {
+                if (groupKey < groupCount) {
+                    for (let pi = 0; pi < paletteSize; pi++) {
+                        if (paletteToGroup[pi] === groupKey) return pi;
+                    }
+                    return 0;
+                }
+                return groupKey - groupCount;
+            };
 
             for (let iter = 0; iter < iters; iter++) {
                 // Activity Pass: Only check 1px neighbors to find edges
@@ -270,34 +323,37 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                             const nRow = ny * nativeWidth;
                             for (let nx = xS; nx <= xE; nx++) {
                                 const nIdx = lowResIdxMap[nRow + nx];
-                                if (localCounts[nIdx] === 0) foundColors[foundCount++] = nIdx;
-                                localCounts[nIdx]++;
+                                const gKey = getGroupKey(nIdx);
+                                if (localCounts[gKey] === 0) foundColors[foundCount++] = gKey;
+                                localCounts[gKey]++;
                             }
                         }
 
                         let m1 = 0, m1c = 0, m2 = 0, m2c = 0, m3 = 0, m3c = 0;
                         for (let j = 0; j < foundCount; j++) {
-                            const pIdx = foundColors[j], c = localCounts[pIdx];
-                            if (c > m1c) { m3 = m2; m3c = m2c; m2 = m1; m2c = m1c; m1 = pIdx; m1c = c; }
-                            else if (c > m2c) { m3 = m2; m3c = m2c; m2 = pIdx; m2c = c; }
-                            else if (c > m3c) { m3 = pIdx; m3c = c; }
-                            localCounts[pIdx] = 0; // Clear for next pixel
+                            const gKey = foundColors[j], c = localCounts[gKey];
+                            if (c > m1c) { m3 = m2; m3c = m2c; m2 = m1; m2c = m1c; m1 = gKey; m1c = c; }
+                            else if (c > m2c) { m3 = m2; m3c = m2c; m2 = gKey; m2c = c; }
+                            else if (c > m3c) { m3 = gKey; m3c = c; }
+                            localCounts[gKey] = 0;
                         }
 
                         if (m1 !== m2 && m2 !== m3) {
-                            const d13Sq = (pR[m1]-pR[m3])**2 + (pG[m1]-pG[m3])**2 + (pB[m1]-pB[m3])**2;
-                            const d12Sq = (pR[m1]-pR[m2])**2 + (pG[m1]-pG[m2])**2 + (pB[m1]-pB[m2])**2;
-                            const d23Sq = (pR[m3]-pR[m2])**2 + (pG[m3]-pG[m2])**2 + (pB[m3]-pB[m2])**2;
-                            // Betweenness Check
+                            const c1 = getColor(m1), c2 = getColor(m2), c3 = getColor(m3);
+                            const d13Sq = (c1.r-c3.r)**2 + (c1.g-c3.g)**2 + (c1.b-c3.b)**2;
+                            const d12Sq = (c1.r-c2.r)**2 + (c1.g-c2.g)**2 + (c1.b-c2.b)**2;
+                            const d23Sq = (c3.r-c2.r)**2 + (c3.g-c2.g)**2 + (c3.b-c2.b)**2;
                             if (d12Sq + d23Sq + 2*Math.sqrt(d12Sq * d23Sq) < d13Sq * 1.21) { m2 = m3; m2c = m3c; }
                         }
                         if (m2c < ((yE-yS+1)*(xE-xS+1)) * 0.10) m2 = m1;
 
                         const cur = lowResIdxMap[idx], sI = idx << 2;
-                        let e1 = (nativePixelData[sI]-pR[m1])**2 + (nativePixelData[sI+1]-pG[m1])**2 + (nativePixelData[sI+2]-pB[m1])**2;
-                        let e2 = (nativePixelData[sI]-pR[m2])**2 + (nativePixelData[sI+1]-pG[m2])**2 + (nativePixelData[sI+2]-pB[m2])**2;
-                        if (cur === m1) e1 *= stiffness; else if (cur === m2) e2 *= stiffness;
-                        tempIdxMap[idx] = e1 < e2 ? m1 : m2;
+                        const c1 = getColor(m1), c2 = getColor(m2);
+                        let e1 = (nativePixelData[sI]-c1.r)**2 + (nativePixelData[sI+1]-c1.g)**2 + (nativePixelData[sI+2]-c1.b)**2;
+                        let e2 = (nativePixelData[sI]-c2.r)**2 + (nativePixelData[sI+1]-c2.g)**2 + (nativePixelData[sI+2]-c2.b)**2;
+                        const curGroupKey = getGroupKey(cur);
+                        if (curGroupKey === m1) e1 *= stiffness; else if (curGroupKey === m2) e2 *= stiffness;
+                        tempIdxMap[idx] = e1 < e2 ? groupKeyToPaletteIdx(m1) : groupKeyToPaletteIdx(m2);
                     }
                 }
                 lowResIdxMap.set(tempIdxMap);
@@ -353,9 +409,33 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             aSigmoidLUT[i] = ((1 / (1 + Math.exp(-ka * (t - 0.5)))) - as0) / (as1 - as0);
         }
 
-        const rw = new Float32Array(paletteSize), rAdj = new Uint8Array(paletteSize);
-        const uC = new Uint16Array(paletteSize), sC = new Uint16Array(paletteSize);
+        const maxGroups = groupCount + paletteSize;
+        const rw = new Float32Array(maxGroups), rAdj = new Uint8Array(maxGroups);
+        const uC = new Uint16Array(maxGroups), sC = new Uint16Array(maxGroups);
         const sX = fWWidth / nativeWidth, sY = fWHeight / nativeHeight;
+
+        const getGroupKeyPhase3 = (pIdx: number): number => {
+            const gId = paletteToGroup[pIdx];
+            return gId >= 0 ? gId : groupCount + pIdx;
+        };
+
+        const getColorPhase3 = (groupKey: number): { r: number; g: number; b: number } => {
+            if (groupKey < groupCount) {
+                return { r: groupCanonicalR[groupKey], g: groupCanonicalG[groupKey], b: groupCanonicalB[groupKey] };
+            }
+            const pIdx = groupKey - groupCount;
+            return { r: pR[pIdx], g: pG[pIdx], b: pB[pIdx] };
+        };
+
+        const groupKeyToPaletteIdxPhase3 = (groupKey: number): number => {
+            if (groupKey < groupCount) {
+                for (let pi = 0; pi < paletteSize; pi++) {
+                    if (paletteToGroup[pi] === groupKey) return pi;
+                }
+                return 0;
+            }
+            return groupKey - groupCount;
+        };
 
         for (let y = 0; y < fWHeight; y++) {
             const ly = Math.min(nativeHeight - 1, (y / sY) | 0), nativeRow = ly * nativeWidth;
@@ -369,13 +449,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     const dy = Math.abs(ny - ly), nRow = ny * nativeWidth;
                     for (let nx = x0; nx <= x1; nx++) {
                         const nIdx = lowResIdxMap[nRow + nx];
-                        if (rw[nIdx] === 0) uC[ucLen++] = nIdx;
-                        rw[nIdx] += (Math.abs(nx - lx) > 1 || dy > 1) ? 0.2 : (Math.abs(nx - lx) > 0 || dy > 0) ? 0.5 : 1.0;
+                        const gKey = getGroupKeyPhase3(nIdx);
+                        if (rw[gKey] === 0) uC[ucLen++] = gKey;
+                        rw[gKey] += (Math.abs(nx - lx) > 1 || dy > 1) ? 0.2 : (Math.abs(nx - lx) > 0 || dy > 0) ? 0.5 : 1.0;
                     }
                 }
 
                 if (ucLen === 1) {
-                    const id = uC[0]; outData[oIdx] = pTR[id]; outData[oIdx+1] = pTG[id]; outData[oIdx+2] = pTB[id];
+                    const id = groupKeyToPaletteIdxPhase3(uC[0]); outData[oIdx] = pTR[id]; outData[oIdx+1] = pTG[id]; outData[oIdx+2] = pTB[id];
                     outData[oIdx+3] = nativeAlpha ? (aI === 0 ? nativeAlpha[nativeRow + lx] : (aSigmoidLUT[hResData[oIdx+3]] * 255) | 0) : 255;
                     continue;
                 }
@@ -383,18 +464,20 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const rR = hResData[oIdx], rG = hResData[oIdx+1], rB = hResData[oIdx+2];
                 let scLen = 0;
                 cand: for (let i = 0; i < ucLen; i++) {
-                    const ci = uC[i], cr = pR[ci], cg = pG[ci], cb = pB[ci];
+                    const gKeyI = uC[i], cI = getColorPhase3(gKeyI);
                     for (let j = 0; j < ucLen; j++) {
-                        const ai = uC[j]; if (ai === ci) continue;
+                        const gKeyJ = uC[j]; if (gKeyJ === gKeyI) continue;
+                        const cJ = getColorPhase3(gKeyJ);
                         for (let k = 0; k < ucLen; k++) {
-                            const bi = uC[k]; if (bi === ci || ai === bi) continue;
-                            const dAB = (pR[ai]-pR[bi])**2 + (pG[ai]-pG[bi])**2 + (pB[ai]-pB[bi])**2;
-                            const dAC = (pR[ai]-cr)**2 + (pG[ai]-cg)**2 + (pB[ai]-cb)**2;
-                            const dBC = (pR[bi]-cr)**2 + (pG[bi]-cg)**2 + (pB[bi]-cb)**2;
-                            if (dAC + dBC + 2*Math.sqrt(dAC*dBC) < dAB * 1.21 && dAB > 100 && rw[ai] > rw[ci] && rw[bi] > rw[ci]) continue cand;
+                            const gKeyK = uC[k]; if (gKeyK === gKeyI || gKeyJ === gKeyK) continue;
+                            const cK = getColorPhase3(gKeyK);
+                            const dAB = (cJ.r-cK.r)**2 + (cJ.g-cK.g)**2 + (cJ.b-cK.b)**2;
+                            const dAC = (cJ.r-cI.r)**2 + (cJ.g-cI.g)**2 + (cJ.b-cI.b)**2;
+                            const dBC = (cK.r-cI.r)**2 + (cK.g-cI.g)**2 + (cK.b-cI.b)**2;
+                            if (dAC + dBC + 2*Math.sqrt(dAC*dBC) < dAB * 1.21 && dAB > 100 && rw[gKeyJ] > rw[gKeyI] && rw[gKeyK] > rw[gKeyI]) continue cand;
                         }
                     }
-                    sC[scLen++] = ci;
+                    sC[scLen++] = gKeyI;
                 }
 
                 rAdj.fill(0);
@@ -402,39 +485,50 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const x30 = Math.max(0, lx - 1), x31 = Math.min(nativeWidth - 1, lx + 1);
                 for (let ny = y30; ny <= y31; ny++) {
                     const row = ny * nativeWidth;
-                    for (let nx = x30; nx <= x31; nx++) rAdj[lowResIdxMap[row + nx]] = 1;
+                    for (let nx = x30; nx <= x31; nx++) {
+                        const nIdx = lowResIdxMap[row + nx];
+                        rAdj[getGroupKeyPhase3(nIdx)] = 1;
+                    }
                 }
 
                 let maxS = -Infinity, m1 = sC[0];
                 for (let i = 0; i < scLen; i++) {
-                    const idx = sC[i];
-                    const score = (rw[idx] * 10) + (rAdj[idx] ? 0 : -1000) - ((rR-pR[idx])**2 + (rG-pG[idx])**2 + (rB-pB[idx])**2);
-                    if (score > maxS) { maxS = score; m1 = idx; }
+                    const gKey = sC[i];
+                    const c = getColorPhase3(gKey);
+                    const score = (rw[gKey] * 10) + (rAdj[gKey] ? 0 : -1000) - ((rR-c.r)**2 + (rG-c.g)**2 + (rB-c.b)**2);
+                    if (score > maxS) { maxS = score; m1 = gKey; }
                 }
                 
                 let m2 = m1, sM2 = -Infinity;
                 for (let i = 0; i < scLen; i++) {
-                    const idx = sC[i];
-                    if (idx === m1) continue;
-                    const score = (rw[idx] * 10) + (rAdj[idx] ? 0 : -1000) - ((rR-pR[idx])**2 + (rG-pG[idx])**2 + (rB-pB[idx])**2);
-                    if (score > sM2) { sM2 = score; m2 = idx; }
+                    const gKey = sC[i];
+                    if (gKey === m1) continue;
+                    const c = getColorPhase3(gKey);
+                    const score = (rw[gKey] * 10) + (rAdj[gKey] ? 0 : -1000) - ((rR-c.r)**2 + (rG-c.g)**2 + (rB-c.b)**2);
+                    if (score > sM2) { sM2 = score; m2 = gKey; }
                 }
                 if (sM2 <= -500) m2 = m1;
 
                 const core = lowResIdxMap[nativeRow + lx];
+                const coreGroupKey = getGroupKeyPhase3(core);
                 let isS = false;
-                for (let i = 0; i < scLen; i++) if (sC[i] === core) { isS = true; break; }
-                let bA = isS ? core : m1, bB = (bA === m1) ? m2 : m1;
+                for (let i = 0; i < scLen; i++) if (sC[i] === coreGroupKey) { isS = true; break; }
+                let bA = isS ? coreGroupKey : m1, bB = (bA === m1) ? m2 : m1;
                 if (rw[bB] < 0.3) bB = bA;
 
+                const bAIdx = groupKeyToPaletteIdxPhase3(bA);
+                const bBIdx = groupKeyToPaletteIdxPhase3(bB);
+                const cA = getColorPhase3(bA);
+                const cB = getColorPhase3(bB);
+
                 if (bA === bB || intensity === 0) {
-                    const win = ((rR-pR[bA])**2+(rG-pG[bA])**2+(rB-pB[bA])**2 < (rR-pR[bB])**2+(rG-pG[bB])**2+(rB-pB[bB])**2) ? bA : bB;
+                    const win = ((rR-cA.r)**2+(rG-cA.g)**2+(rB-cA.b)**2 < (rR-cB.r)**2+(rG-cB.g)**2+(rB-cB.b)**2) ? bAIdx : bBIdx;
                     outData[oIdx] = pTR[win]; outData[oIdx+1] = pTG[win]; outData[oIdx+2] = pTB[win];
                 } else {
-                    const c1r = pR[bA], c1g = pG[bA], c1b = pB[bA], dr = pR[bB]-c1r, dg = pG[bB]-c1g, db = pB[bB]-c1b, lSq = dr*dr+dg*dg+db*db;
+                    const c1r = cA.r, c1g = cA.g, c1b = cA.b, dr = cB.r-c1r, dg = cB.g-c1g, db = cB.b-c1b, lSq = dr*dr+dg*dg+db*db;
                     let t = lSq > 0 ? Math.max(0, Math.min(1, ((rR-c1r)*dr+(rG-c1g)*dg+(rB-c1b)*db)/lSq)) : 0;
                     if (t > 0 && t < 1 && (t < 0.4 || t > 0.6)) {
-                        const mr = (c1r+pR[bB])/2, mg = (c1g+pG[bB])/2, mb = (c1b+pB[bB])/2, rDSq = (c1r-mr)**2+(c1g-mg)**2+(c1b-mb)**2;
+                        const mr = (c1r+cB.r)/2, mg = (c1g+cB.g)/2, mb = (c1b+cB.b)/2, rDSq = (c1r-mr)**2+(c1g-mg)**2+(c1b-mb)**2;
                         let ok = false, sRad = intensity > 0.7 ? 3 : 2;
                         search: for (let ny = -sRad; ny <= sRad; ny++) {
                             for (let nx = -sRad; nx <= sRad; nx++) {
@@ -447,9 +541,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     }
                     if (t > 0 && t < 0.25 && (rR-c1r)**2+(rG-c1g)**2+(rB-c1b)**2 < lSq*(0.05*(1-intensity))) t = 0;
                     const fT = sigmoidLUT[(t * 1024) | 0];
-                    outData[oIdx] = (pTR[bA] + fT * (pTR[bB]-pTR[bA])) | 0;
-                    outData[oIdx+1] = (pTG[bA] + fT * (pTG[bB]-pTG[bA])) | 0;
-                    outData[oIdx+2] = (pTB[bA] + fT * (pTB[bB]-pTB[bA])) | 0;
+                    outData[oIdx] = (pTR[bAIdx] + fT * (pTR[bBIdx]-pTR[bAIdx])) | 0;
+                    outData[oIdx+1] = (pTG[bAIdx] + fT * (pTG[bBIdx]-pTG[bAIdx])) | 0;
+                    outData[oIdx+2] = (pTB[bAIdx] + fT * (pTB[bBIdx]-pTB[bAIdx])) | 0;
                 }
                 outData[oIdx+3] = nativeAlpha && hResData[oIdx+3] < 255 ? (aSigmoidLUT[hResData[oIdx+3]] * 255) | 0 : 255;
             }
